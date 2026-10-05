@@ -1,0 +1,12 @@
+.git
+node_modules
+**/node_modules
+.env*
+**/.env*
+data
+artifacts
+docs
+deploy
+src/web/dist
+*.tsbuildinfo
+.DS_Store

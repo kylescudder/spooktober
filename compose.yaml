@@ -1,0 +1,25 @@
+services:
+  spooktober:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: spooktober:local
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - spooktober-data:/data
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 64m
+    pids_limit: 64
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "2"
+
+volumes:
+  spooktober-data:

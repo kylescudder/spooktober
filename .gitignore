@@ -1,0 +1,9 @@
+/node_modules/
+/src/web/dist/
+/data/
+/artifacts/
+.env*
+!.env.example
+*-backup.json
+*.tsbuildinfo
+.DS_Store
