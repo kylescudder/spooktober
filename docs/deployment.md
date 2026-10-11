@@ -108,7 +108,7 @@ Before updates, back up the database and keep the previous image. Apply migratio
 
 Pull requests run `.github/workflows/ci.yml`: type checks, unit tests, the production build, integration tests against a disposable PostgreSQL 18 service, and an unpublished build of the production image. It has read-only repository access and no secrets.
 
-Every push to `main` runs `.github/workflows/release.yml`. It repeats those checks, builds native `linux/amd64` and `linux/arm64` images from the root Dockerfile and publishes a multi-platform image to `ghcr.io/kylescudder/spooktober` tagged `sha-<commit>`. It signs a build provenance attestation for that digest, then moves the `main` tag to it. Protect `main` with required pull requests and a passing `CI / check`, since every merge publishes an image.
+Every push to `main` runs `.github/workflows/release.yml`. It repeats those checks, builds native `linux/amd64` and `linux/arm64` images from the root Dockerfile and publishes a multi-platform image to `ghcr.io/kylescudder/spooktober` tagged `sha-<commit>`. It signs a build provenance attestation for that digest, then moves the `main` tag to it. When the `DEPLOY_ENABLED` repository variable is `true`, a final `deploy` job asks Herman to deploy that digest through a signed webhook and waits until `/healthz` reports the new commit in its `X-Spooktober-Revision` header; see the [Herman deploy handover](herman-deploy-handover.md). Protect `main` with required pull requests and a passing `CI / check`, since every merge publishes an image.
 
 Verify an image before running it:
 
