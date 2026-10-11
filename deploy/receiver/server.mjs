@@ -1,9 +1,9 @@
 // Spooktober deploy webhook receiver. Internet-facing via Cloudflare Tunnel and
 // Caddy, so it has no Docker access: it verifies a signed request and drops it
-// into a spool directory. A systemd path unit on the host picks it up and runs
+// into a spool directory. An event-driven host service picks it up and runs
 // deploy/herman-deploy.sh, which verifies the image attestation itself.
-import { createHmac, timingSafeEqual } from "node:crypto";
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { createHmac, timingSafeEqual, randomUUID } from "node:crypto";
+import { readFileSync, readdirSync, renameSync, writeFileSync, unlinkSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 
@@ -16,7 +16,7 @@ const maxSkewSeconds = 300;
 
 const log = (message) => console.log(`[deploy-hook] ${new Date().toISOString()} ${message}`);
 const reply = (response, status, message) => {
-  response.writeHead(status, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+  response.writeHead(status, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "X-Spooktober-Deploy-Hook": "1" });
   response.end(`${message}\n`);
 };
 
@@ -57,10 +57,20 @@ createServer((request, response) => {
       log(`rejected signed request: ${error.message}`);
       return reply(response, 400, error.message);
     }
-    // Write then rename so the host never sees a partial request.
-    const name = `${deploy.timestamp}-${deploy.revision}.json`;
-    writeFileSync(join(spool, "tmp", name), JSON.stringify(deploy), { mode: 0o600 });
-    renameSync(join(spool, "tmp", name), join(spool, "requests", name));
+    // Keep both paths on the same bind mount: rename across separate mounts
+    // fails with EXDEV even when the host directories share a filesystem.
+    const requests = join(spool, "requests");
+    if (readdirSync(requests).length >= 64) return reply(response, 503, "queue full");
+    const name = `${deploy.timestamp}-${deploy.revision}-${randomUUID()}.json`;
+    const temporary = join(requests, `.${name}.tmp`);
+    try {
+      writeFileSync(temporary, JSON.stringify(deploy), { mode: 0o600, flag: "wx" });
+      renameSync(temporary, join(requests, name));
+    } catch {
+      try { unlinkSync(temporary); } catch {}
+      log("could not persist request");
+      return reply(response, 503, "queue unavailable");
+    }
     log(`queued ${deploy.digest} (${deploy.revision})`);
     reply(response, 202, "queued");
   });

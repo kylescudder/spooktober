@@ -9,3 +9,7 @@ next-env.d.ts
 *-backup.json
 *.tsbuildinfo
 .DS_Store
+/secrets/
+/state/
+/backups/
+/deploy-spool/

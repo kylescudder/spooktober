@@ -1,9 +1,0 @@
-[Unit]
-Description=Start a Spooktober deploy when the webhook queues a request
-
-[Path]
-DirectoryNotEmpty=/srv/apps/spooktober/deploy-spool/requests
-Unit=spooktober-deploy.service
-
-[Install]
-WantedBy=paths.target

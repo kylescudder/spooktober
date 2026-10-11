@@ -1,5 +1,5 @@
 # Publishes a checked, attested image for every commit on main. GitHub holds
-# no production credentials.
+# only webhook/Access credentials, never database, Clerk or shell access.
 name: Release
 
 on:
@@ -132,6 +132,29 @@ jobs:
       DEPLOY_URL: https://deploy.kylescudder.co.uk/hooks/spooktober
       HEALTH_URL: https://spooktober.kylescudder.co.uk/healthz
     steps:
+      - name: Check deploy endpoint protection
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          headers=$(mktemp)
+          trap 'rm -f "$headers"' EXIT
+          status=$(curl --silent --show-error --max-time 30 --output /dev/null --write-out '%{http_code}' \
+            --dump-header "$headers" -X POST "$DEPLOY_URL")
+          [[ "$status" = 401 || "$status" = 403 ]] || { echo "::error::Cloudflare Access did not block an unauthenticated request ($status)."; exit 1; }
+          ! grep -qi '^x-spooktober-deploy-hook: 1' "$headers" || { echo '::error::Unauthenticated request reached the receiver.'; exit 1; }
+          for path in / /healthz /other; do
+            status=$(curl --silent --show-error --max-time 30 --output /dev/null --write-out '%{http_code}' \
+              -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+              "https://deploy.kylescudder.co.uk$path")
+            [[ "$status" = 404 ]] || { echo "::error::Non-webhook path returned $status."; exit 1; }
+          done
+          status=$(curl --silent --show-error --max-time 30 --output /dev/null --write-out '%{http_code}' \
+            --dump-header "$headers" \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            -H 'X-Spooktober-Signature: sha256=invalid' --data '{}' "$DEPLOY_URL")
+          [[ "$status" = 401 ]] || { echo "::error::Invalid webhook signature returned $status."; exit 1; }
+          grep -qi '^x-spooktober-deploy-hook: 1' "$headers" || { echo '::error::Service token did not reach the receiver.'; exit 1; }
       - name: Request deploy
         env:
           DIGEST: ${{ needs.publish.outputs.digest }}
@@ -151,7 +174,7 @@ jobs:
       - name: Wait for production to run this commit
         run: |
           for attempt in $(seq 60); do
-            revision=$(curl --silent --max-time 10 --dump-header - --output /dev/null "$HEALTH_URL" \
+            revision=$(curl --fail --silent --max-time 10 --dump-header - --output /dev/null "$HEALTH_URL" \
               | tr -d '\r' | awk -F': ' 'tolower($1) == "x-spooktober-revision" {print $2}' || true)
             if [ "$revision" = "$GITHUB_SHA" ]; then
               echo "Production is running $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
@@ -159,5 +182,5 @@ jobs:
             fi
             sleep 10
           done
-          echo "::error::Production did not report $GITHUB_SHA within 10 minutes (last: ${revision:-none}). Check journalctl -u spooktober-deploy on Herman."
+          echo "::error::Production did not report $GITHUB_SHA within 10 minutes (last: ${revision:-none}). Check state/deploy.log on Herman."
           exit 1

@@ -1,22 +1,22 @@
 # Deploy webhook receiver for Herman. Run from the repository root:
 #   docker compose -f deploy/compose.deploy-hook.yaml --env-file .env.deploy-hook up -d
 # It has no Docker socket and no database access; it only writes signed
-# requests into the spool directory consumed by spooktober-deploy.path.
+# requests into the spool directory consumed by the host's event-driven service.
 name: spooktober-deploy-hook
 
 services:
   deploy-hook:
-    image: node:22-alpine
+    image: node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402
     command: ["node", "/app/server.mjs"]
     restart: unless-stopped
-    user: "${DEPLOY_HOOK_USER:?set DEPLOY_HOOK_USER to the spooktober-deploy uid:gid}"
+    user: "${DEPLOY_HOOK_USER:?set DEPLOY_HOOK_USER to the queue owner uid:gid}"
     environment:
       PORT: "9000"
       SPOOL_DIR: /spool
       WEBHOOK_SECRET_FILE: /run/secrets/deploy_webhook_secret
     volumes:
       - ./receiver/server.mjs:/app/server.mjs:ro
-      - ${DEPLOY_SPOOL_DIR:-/srv/apps/spooktober/deploy-spool}:/spool
+      - ${DEPLOY_SPOOL_DIR:-../deploy-spool}/requests:/spool/requests
     secrets:
       - deploy_webhook_secret
     networks:
@@ -40,7 +40,7 @@ services:
 
 secrets:
   deploy_webhook_secret:
-    file: ${DEPLOY_WEBHOOK_SECRET_FILE:-/srv/apps/spooktober/secrets/deploy-webhook-secret}
+    file: ${DEPLOY_WEBHOOK_SECRET_FILE:-../secrets/deploy-webhook-secret}
 
 networks:
   web:
