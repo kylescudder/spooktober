@@ -1,0 +1,32 @@
+services:
+  spooktober:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: spooktober:local
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      web:
+        aliases: [spooktober]
+      database:
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    mem_limit: 256m
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "2"
+
+networks:
+  web:
+    external: true
+    name: ${PLATFORM_WEB_NETWORK:-platform-web}
+  database:
+    external: true
+    name: ${PLATFORM_DB_NETWORK:-platform-db}
