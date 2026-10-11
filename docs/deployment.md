@@ -104,6 +104,23 @@ Check the exit status before treating output as a backup. Restore with `node dat
 
 Before updates, back up the database and keep the previous image. Apply migrations with the owner role and update grants before deploying. Roll back only to an image compatible with the schema. Preserve the latest data before recovery; restoring an old snapshot after new edits would discard those edits.
 
+## Continuous integration and releases
+
+Pull requests run `.github/workflows/ci.yml`: type checks, unit tests, the production build, integration tests against a disposable PostgreSQL 18 service, and an unpublished build of the production image. It has read-only repository access and no secrets.
+
+Every push to `main` runs `.github/workflows/release.yml`. It repeats those checks, builds native `linux/amd64` and `linux/arm64` images from the root Dockerfile and publishes a multi-platform image to `ghcr.io/kylescudder/spooktober` tagged `sha-<commit>`. It signs a build provenance attestation for that digest, then moves the `main` tag to it. Protect `main` with required pull requests and a passing `CI / check`, since every merge publishes an image.
+
+Verify an image before running it:
+
+```sh
+gh attestation verify oci://ghcr.io/kylescudder/spooktober@sha256:<digest> --bundle-from-oci \
+  --repo kylescudder/spooktober \
+  --signer-workflow kylescudder/spooktober/.github/workflows/release.yml \
+  --source-ref refs/heads/main --deny-self-hosted-runners
+```
+
+To run a published image instead of a local build, set `SPOOKTOBER_IMAGE` to its exact digest, for example `SPOOKTOBER_IMAGE=ghcr.io/kylescudder/spooktober@sha256:<digest> docker compose up -d --no-build`. Without it, Compose uses `spooktober:local`. The package must be public, or the host logged in to `ghcr.io` with a `read:packages` token.
+
 ## Local development
 
 `compose.dev.yaml` runs the same app with its own PostgreSQL 18 service, development-only login and loopback ports. Follow the [README](../README.md) for Docker or Node.js development. No service or binary is installed on the host by these files. The production platform remains separate from local development.

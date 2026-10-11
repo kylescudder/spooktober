@@ -3,7 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: spooktober:local
+    # Set to a verified ghcr.io digest to run a published release; see docs/deployment.md.
+    image: ${SPOOKTOBER_IMAGE:-spooktober:local}
     restart: unless-stopped
     env_file: .env
     networks:

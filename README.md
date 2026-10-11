@@ -90,7 +90,7 @@ Create the control database once. Tests cover migrations, restricted runtime per
 1. [Hermes: configure the shared infrastructure](docs/hermes-infrastructure-plan.md): PostgreSQL, Docker Compose, Caddy, Cloudflare Tunnel and backups, including static and server-rendered Astro support from the initial delivery.
 2. [Set up Spooktober](docs/spooktober-setup-plan.md): provision its database, run migrations, import the film list and publish this Next.js app on that platform.
 
-Production runs one Next.js container using the shared PostgreSQL server. It joins the platform's existing web/database networks and publishes no host port. The image uses Next.js standalone output, with a 256 MiB container limit and a four-connection database pool. See [deployment instructions](docs/deployment.md) for the exact commands and runtime configuration. No Vercel account is needed.
+Production runs one Next.js container using the shared PostgreSQL server. It joins the platform's existing web/database networks and publishes no host port. The image uses Next.js standalone output, with a 256 MiB container limit and a four-connection database pool. See [deployment instructions](docs/deployment.md) for the exact commands and runtime configuration. Pushes to `main` are checked and published to GHCR by GitHub Actions ([CI and releases](docs/deployment.md#continuous-integration-and-releases)). No Vercel account is needed.
 
 The PostgreSQL schema is unchanged by this framework migration. Existing PostgreSQL data can be used directly. For the old hosted watchlist, refresh the private JSON export before cutover and import it into an empty migrated database.
 
