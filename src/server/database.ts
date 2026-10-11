@@ -1,0 +1,134 @@
+import "server-only";
+import { readFile, readdir } from "node:fs/promises";
+import { join } from "node:path";
+import pg, { type Pool, type PoolClient, type PoolConfig } from "pg";
+import type { Film } from "../lib/films.ts";
+import { FilmError, completeOrder } from "../lib/validation.ts";
+
+// The same database-scoped transaction lock as the previous PostgreSQL release.
+const watchlistLock = "6003385505269698370";
+const migrationsDirectory = () => join(process.cwd(), "src/migrations");
+type Queryable = Pick<PoolClient, "query">;
+
+export function databaseConfig(databaseURL: string | undefined): PoolConfig {
+  try {
+    if (!databaseURL) throw new Error();
+    const url = new URL(databaseURL);
+    if (!["postgres:", "postgresql:"].includes(url.protocol) || !url.hostname || !url.pathname.replace(/\//g, "")) throw new Error();
+    return {
+      connectionString: databaseURL, max: 4, connectionTimeoutMillis: 5000,
+      idleTimeoutMillis: 300000, maxLifetimeSeconds: 1800,
+      application_name: "spooktober", statement_timeout: 10000, lock_timeout: 5000,
+      query_timeout: 12000, options: "-c timezone=UTC -c search_path=public",
+    };
+  } catch { throw new Error("Set DATABASE_URL to a valid postgres:// or postgresql:// URL including the database name."); }
+}
+
+export function createDatabase(databaseURL: string | undefined): Pool {
+  const pool = new pg.Pool(databaseConfig(databaseURL));
+  pool.on("error", () => console.error("Spooktober lost an idle PostgreSQL connection; it will reconnect on the next request."));
+  return pool;
+}
+
+const globals = globalThis as typeof globalThis & { spooktoberDatabase?: Pool };
+export function database(): Pool {
+  return globals.spooktoberDatabase ??= createDatabase(process.env.DATABASE_URL);
+}
+
+export async function migrationFiles() {
+  const files = (await readdir(migrationsDirectory())).sort();
+  if (!files.length || files.some((file, index) => !/^\d{3}_.+\.sql$/.test(file) || Number(file.slice(0, 3)) !== index + 1)) {
+    throw new Error("PostgreSQL migrations must have consecutive versions starting at 001.");
+  }
+  return files;
+}
+
+async function transaction<T>(pool: Pool, work: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  let unusable = false;
+  try {
+    await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+    await client.query("SELECT pg_advisory_xact_lock($1::bigint)", [watchlistLock]);
+    const value = await work(client);
+    await client.query("COMMIT");
+    return value;
+  } catch (error) {
+    try { await client.query("ROLLBACK"); } catch { unusable = true; }
+    throw error;
+  } finally { client.release(unusable); }
+}
+
+export async function migrateDatabase(pool: Pool) {
+  const files = await migrationFiles();
+  await transaction(pool, async (client) => {
+    await client.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INTEGER PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`);
+    const { rows: [history] } = await client.query("SELECT COALESCE(MAX(version),0)::int AS version, COUNT(*)::int AS applied FROM schema_migrations");
+    if (history.version > files.length || history.applied !== history.version) throw new Error("Database migration history is incompatible with this Spooktober version.");
+    for (let i = history.version; i < files.length; i++) {
+      await client.query(await readFile(join(migrationsDirectory(), files[i]), "utf8"));
+      await client.query("INSERT INTO schema_migrations (version) VALUES ($1)", [i + 1]);
+    }
+  });
+}
+
+export async function readyDatabase(pool: Pool) {
+  const files = await migrationFiles();
+  const { rows: [history] } = await pool.query(`SELECT COALESCE(MAX(version),0)::int AS version, COUNT(*)::int AS applied,
+    EXISTS(SELECT 1 FROM films) AS has_films FROM schema_migrations`);
+  if (history.version !== files.length || history.applied !== history.version) throw new Error("PostgreSQL schema does not match this app; run db migrate before starting.");
+}
+
+export async function listFilms(db: Queryable): Promise<Film[]> {
+  const { rows } = await db.query<Film>(`SELECT id,title,position,watched,watched_at AS "watchedAt",
+    updated_at AS "updatedAt",created_at AS "createdAt" FROM films ORDER BY position,id`);
+  return rows;
+}
+
+async function changeFilms(pool: Pool, change: (client: PoolClient) => Promise<void>): Promise<Film[]> {
+  return transaction(pool, async (client) => { await change(client); return listFilms(client); });
+}
+
+export async function addFilm(pool: Pool, id: string, title: string) {
+  return changeFilms(pool, async (client) => {
+    const { rows: [existing] } = await client.query("SELECT title FROM films WHERE id=$1", [id]);
+    if (existing) {
+      if (existing.title !== title) throw new FilmError("This film identifier has already been used. Please refresh.", 409);
+      return;
+    }
+    const now = new Date().toISOString();
+    await client.query(`INSERT INTO films (id,title,position,watched,created_at,updated_at)
+      SELECT $1,$2,COALESCE(MAX(position)+1,0),false,$3,$3 FROM films`, [id, title, now]);
+  });
+}
+
+export async function markWatched(pool: Pool, id: string, watched: boolean) {
+  return changeFilms(pool, async (client) => {
+    const { rowCount } = await client.query(`UPDATE films SET watched_at=CASE
+      WHEN NOT $1 THEN NULL WHEN NOT watched THEN $2 ELSE watched_at END,
+      watched=$1,updated_at=$2 WHERE id=$3`, [watched, new Date().toISOString(), id]);
+    if (!rowCount) throw new FilmError("That film is no longer on the list. Please refresh.", 404);
+  });
+}
+
+export async function reorderFilms(pool: Pool, requested: string[]) {
+  return changeFilms(pool, async (client) => {
+    const films = await listFilms(client);
+    const ids = completeOrder(requested, films.map((film) => film.id));
+    const now = new Date().toISOString();
+    for (const [position, id] of ids.entries()) await client.query("UPDATE films SET position=$1,updated_at=$2 WHERE id=$3", [position, now, id]);
+  });
+}
+
+export async function importFilms(pool: Pool, films: Film[]) {
+  await readyDatabase(pool);
+  await transaction(pool, async (client) => {
+    const { rows: [existing] } = await client.query("SELECT COUNT(*)::int AS count FROM films");
+    if (existing.count) throw new Error("Seed/import requires an empty database; existing films were left unchanged.");
+    for (const film of films) {
+      await client.query(`INSERT INTO films (id,title,position,watched,watched_at,created_at,updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7)`, [film.id, film.title, film.position, film.watched, film.watchedAt, film.createdAt, film.updatedAt]);
+    }
+  });
+}

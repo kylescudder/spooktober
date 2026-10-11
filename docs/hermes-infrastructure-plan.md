@@ -30,6 +30,8 @@ flowchart LR
 
 The connector establishes the tunnel outward; arrows show the visitor's request path. Static sites need neither a database nor a running Node process. Each dynamic project needing storage gets its own database and restricted credentials.
 
+The generic application-container path also hosts Next.js SSR apps, including Spooktober, using the same private web/database networks and Caddy routing. Static and server-rendered Astro support remains part of the initial platform delivery.
+
 Suggested layout:
 
 ```text
@@ -60,7 +62,7 @@ Create shared networks once, using stable names. Separate application Compose pr
 | `postgres` | `platform-db` | None |
 | Dynamic project | `platform-web`, plus `platform-db` when needed | None |
 
-Make `platform-db` an internal network. Caddy does not need database access. Give every application a unique upstream alias on `platform-web`; document the PostgreSQL alias on `platform-db`. The edge network must permit outbound tunnel connections.
+Make `platform-db` an internal network. Caddy does not need database access. Give every application a unique upstream alias on `platform-web`; document the PostgreSQL alias on `platform-db`. The edge network must permit outbound tunnel connections. The app web network must support outbound HTTPS and DNS for services such as external identity providers; keep the database network internal.
 
 Pin tested image versions and record digests. Configure persistent volumes, compatible filesystem permissions, restart policies, health checks and bounded logs. Set resource budgets from the host's available capacity, reserve room for future projects, and record measured usage. Provide a small connection-pool recommendation for database applications, initially around four connections per app.
 

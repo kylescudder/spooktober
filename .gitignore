@@ -1,5 +1,7 @@
 /node_modules/
-/src/web/dist/
+/.next/
+/out/
+next-env.d.ts
 /data/
 /artifacts/
 .env*

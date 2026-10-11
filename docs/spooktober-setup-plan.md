@@ -1,102 +1,107 @@
 # Plan 2 — Set up Spooktober on the deployed platform
 
-Prepared 5 October 2026. Start after [Plan 1: Hermes infrastructure](hermes-infrastructure-plan.md) is complete and its `/srv/platform/handoff.md` is available.
+Updated 11 October 2026. Start after [Plan 1: Hermes infrastructure](hermes-infrastructure-plan.md) is complete and its `/srv/platform/handoff.md` is available.
 
-**Result:** Kyle and Rhiann's existing Halloween watchlist running on the shared platform, protected by Basic Auth, with film order and watched status stored in its own PostgreSQL database.
+**Result:** Kyle and Rhiann's Halloween watchlist running on the shared platform with Clerk sign-in restricted to Kyle and Rhiann, and its own PostgreSQL database. Identity is managed by Clerk; the app and film data are self-hosted. Spooktober uses **Next.js + React + TypeScript, tRPC, Zod and PostgreSQL**; the platform's Astro support is for other sites.
 
-This plan owns Spooktober's application changes, configuration, database, release and data cutover. Use the already deployed PostgreSQL, networks, Caddy, tunnel, provisioning commands and backup system. Any missing shared capability is a gap in Plan 1 to resolve through its runbook, rather than creating duplicate infrastructure.
+This plan owns this application's configuration, database, release and data cutover. Use the existing PostgreSQL, networks, Caddy, tunnel, provisioning and backup commands. Shared infrastructure remains owned by Plan 1.
 
-## 1. Check prerequisites and current app status
+## 1. Receive the platform handoff and application source
 
-Read the completed infrastructure handoff for the host architecture, network names, database endpoint/version, project-provisioning command, migration grants, secret mechanism, container template, hostname-registration command and backup/restore procedures. Actual handoff values take precedence over examples in this plan.
+Read the completed handoff for the host architecture, exact network names, database endpoint/version, provisioning command, secret mechanism, hostname-registration commands and backup/restore procedures. Actual handoff values take precedence over examples below.
 
-Obtain the chosen Spooktober hostname and Basic Auth credentials. `films.example.com` below is a placeholder. Receive the application source as a complete commit or the sanitized `artifacts/spooktober-source-for-hermes.tar.gz` bundle and its checksum. The implementation is currently uncommitted locally, so a fresh remote clone may only contain the initial commit. Credentials and film-data exports are supplied separately through a private channel.
+The final hostname is **spooktober.kylescudder.co.uk**. Use the existing Clerk application and private production configuration described below. Receive a committed Next.js/PostgreSQL revision from Git and build that exact source. Older source bundles and Go/SQLite deployment commands are superseded by this release. Transfer credentials and the final film-data export separately through a private channel.
 
-Current status:
+The PostgreSQL implementation is in the existing `src/` application. It requires `DATABASE_URL`, uses server rendering for the initial list and typed tRPC procedures for interactive saves, and has explicit `node database.cjs migrate`, `seed`, `import` and `export` maintenance commands. Zod validates API input/output and imports. There is no SQLite fallback, automatic migration or automatic seeding during normal startup. Deployment commands are documented in [the runtime guide](deployment.md).
 
-- One application lives in `src/`: a Go HTTP server with an embedded React interface, seed and migrations. Build configuration lives at the repository root. Keep this single source layout.
-- The current app uses **SQLite**. It supports Basic Auth, adding films, watched flags, draggable ordering, polling, JSON export/import and persistent saves.
-- **PostgreSQL support is not implemented.** The current executable does not read `DATABASE_URL`. Complete section 2 before attempting a production deployment on this platform.
-- The SQLite build has passed frontend type checks/tests/build, Go API/authentication/concurrency/persistence tests, container restart checks and browser checks on desktop and mobile. PostgreSQL and this server deployment have not been verified.
-- The earlier hosted list remains at `https://spooktober.kyle978041.chatgpt.site` for export and cutover. Its archived source is outside the active repository; do not recreate a parallel application directory.
+Release checks: `npm run typecheck`, `npm test`, `npm run build`, and `npm run test:integration` with `TEST_DATABASE_URL` pointing to disposable PostgreSQL. The integration suite verifies migration/readiness, restricted runtime permissions, API access policy/origin behavior (with trusted session fixtures), simultaneous writes across connection pools and atomic import/export with restart persistence. Build and test the exact source received before deploying it.
 
-The bundled source excludes credentials, film-data snapshots, generated assets, installed dependencies and hosting metadata. The [existing runtime guide](deployment.md) describes the current SQLite build; revise it as part of the PostgreSQL change below.
+## 2. Provision the app project
 
-## 2. Implement and verify PostgreSQL storage
+Use the existing platform command to create database `spooktober`, runtime login `spooktober_app` and a separate owner/migration role, or the handoff's equivalents. Register this database with the off-host backup mechanism.
 
-Retain the Go server, React interface and existing API behavior. Change storage within `src/`; an Astro or Node rewrite is not required for this app.
+Place the project under `/srv/apps/spooktober/`, keeping application source in its repository's `src/`. Build the root Dockerfile for the host architecture and record the source revision and image digest. Use the root `compose.yaml` with the platform's actual external networks. It publishes no host ports and creates no PostgreSQL service or app data volume.
 
-1. Add a PostgreSQL driver such as `pgx` through `database/sql`, and require `DATABASE_URL` for the production build. Missing or invalid PostgreSQL configuration must fail clearly. Use PostgreSQL as this app's storage going forward; remove the old automatic SQLite path and its deployment configuration.
-2. Add versioned PostgreSQL migrations. Preserve film IDs as text because seeded IDs such as `film-01` are not UUIDs. Preserve title, position, watched flag, nullable viewing date, creation time and update time, with UTC timestamps and the browser's existing camelCase JSON fields. Order deterministically by position and ID.
-3. Replace SQLite placeholders and `PRAGMA` operations. Preserve idempotent add retries, independent watched/order updates, unknown viewing dates as `null`, and stale reorders that retain films added by another viewer.
-4. Serialize list mutations inside PostgreSQL transactions using a consistent transaction-level lock, including position allocation and reorder. The current single SQLite connection serializes operations; PostgreSQL pooling alone does not provide that guarantee. Test concurrent adds/reorders through separate connections.
-5. Provide explicit one-shot migration and JSON import/export commands. Run migrations with the migration role and normal requests with the runtime role. Import atomically into an empty database and refuse to overwrite a populated list. Apply the platform's runtime grants after migrations. Seed the original twenty films only for an intentional fresh start; never seed over imported data or reset the list during startup.
-6. Preserve Basic Auth on the page, assets and film APIs, and same-origin JSON write protection. Configure the exact public HTTPS origin through `PUBLIC_URL`. Readiness must check PostgreSQL connectivity and schema readiness, and the app must recover from temporary database interruptions.
-7. Update the root `Dockerfile`, `compose.yaml`, `.env.example`, `go.mod`, tests and runtime guide for PostgreSQL. Remove SQLite-specific toolchain, flags and data-volume assumptions where no longer needed. Keep the UI embedded in one Go executable, an unprivileged container user and a read-only root filesystem where practical. Use a small bounded connection pool consistent with the platform budget.
-
-Run frontend type checks, validation tests and the production build, plus storage/API tests against disposable PostgreSQL. Verify authentication, cross-origin rejection, import/export, restart persistence, concurrent writes, role grants and recovery after database interruption. Build for the host's architecture and record the source revision or bundle checksum and image digest.
-
-**Gate:** production setup begins only after this PostgreSQL build and its real-database checks pass. Do not deploy the existing SQLite image with a new environment variable and call it migrated.
-
-## 3. Provision this project using the platform
-
-Use the Plan 1 provisioning command to create database `spooktober`, runtime login `spooktober_app` and its separate owner/migration role, or the platform's documented equivalents. Register the database with the existing backup mechanism. Store credentials using the platform secret mechanism; administrator and migration credentials stay out of the normal app service.
-
-Use the generic container template under `/srv/platform/templates/` to create the project under `/srv/apps/spooktober/`. Join the actual shared web/database networks, assign a unique upstream alias, publish no host port and retain versioned release metadata. Set restart policy, health check and bounded logs. Measure usage before setting the final resource limit; previous SQLite measurements do not establish the PostgreSQL app's usage.
-
-The configuration contract after section 2 is:
+Protect runtime `.env` and separate migration credentials using the platform secret mechanism. Runtime configuration is:
 
 ```text
-ADDR=:8080
-DATABASE_URL=<private connection string using the runtime role>
-BASIC_AUTH_USERNAME=spooktober
-BASIC_AUTH_PASSWORD=<supplied privately>
-PUBLIC_URL=https://films.example.com
+DATABASE_URL=<private PostgreSQL URL for the runtime role>
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=<production instance public key>
+CLERK_SECRET_KEY=<same instance private key, supplied privately>
+CLERK_ALLOWED_USER_IDS=<Kyle user ID>,<Rhiann user ID>
+PUBLIC_URL=https://spooktober.kylescudder.co.uk
+PLATFORM_WEB_NETWORK=<actual shared web network>
+PLATFORM_DB_NETWORK=<actual private database network>
 ```
 
-Use the actual username and hostname supplied by Kyle. Keep any environment file ignored and mode 600, or use supported file-based secrets. Deliver the exact migration/import/export commands with the new implementation; current SQLite CLI examples must not be presented as PostgreSQL commands without verification.
+The image listens on container port 8080. It runs one Next.js process with a 256 MiB container limit; PostgreSQL remains shared. Administrator and migration credentials do not belong in the normal app service. Migration history needs runtime `SELECT`; films need `SELECT`, `INSERT` and `UPDATE`. Follow the exact grants and commands in [deployment instructions](deployment.md).
 
-## 4. Verify a test deployment before cutover
+### Clerk already provisioned
 
-Use a temporary hostname and a separate test database through the existing onboarding commands. Test writes must not touch the production list. Register the Caddy route using the app's unique alias and port 8080; the expected route is:
+Use the existing **Spooktober** application, `app_3KY8TyyPWhWcj8kdLfZTH7uW56L`:
+
+- Development instance: `ins_3KY8U3Is3W3o269nRbIVTDM86uT`; this checkout's private `.env` contains its keys and two allowed user IDs.
+- Production instance: `ins_3KY8wpRSWNfSvus47xrxHGyrfSW`; this checkout's private `.env.clerk.production` contains its keys, two production user IDs and final `PUBLIC_URL`. This is auth configuration only: merge it with the server's database/network settings through the platform's private secret mechanism. Do not copy development `.env` to production or commit either file.
+- Kyle: `kyle@thescudders.org`. Rhiann: `rhiann@thescudders.org`. Both users already exist in both instances. Use their saved instance-specific user IDs; do not create replacement accounts.
+- Email-code sign-in is enabled. Passwords and social sign-in are disabled. Registration is restricted; the app additionally checks the two allowed IDs. Home is `/`, custom sign-in and after-sign-out paths are `/sign-in`.
+
+Production DNS, certificates and email-domain verification are still pending. Add these exact **CNAME** records in the Cloudflare `kylescudder.co.uk` zone with proxying **off (DNS only)**:
+
+| Name | Target |
+|---|---|
+| `clerk.spooktober.kylescudder.co.uk` | `frontend-api.clerk.services` |
+| `accounts.spooktober.kylescudder.co.uk` | `accounts.clerk.services` |
+| `clkmail.spooktober.kylescudder.co.uk` | `mail.o5w90otf55dy.clerk.services` |
+| `clk._domainkey.spooktober.kylescudder.co.uk` | `dkim1.o5w90otf55dy.clerk.services` |
+| `clk2._domainkey.spooktober.kylescudder.co.uk` | `dkim2.o5w90otf55dy.clerk.services` |
+
+These records go directly to Clerk and are separate from the app hostname routed through the Cloudflare Tunnel. After propagation, complete and verify DNS, TLS certificates and email verification in [this production instance's Domains page](https://dashboard.clerk.com/apps/app_3KY8TyyPWhWcj8kdLfZTH7uW56L/instances/ins_3KY8wpRSWNfSvus47xrxHGyrfSW/domains). An authenticated Clerk CLI linked to this application can also check `clerk deploy status`. Do not publish the app until these checks succeed.
+
+The app container needs outbound HTTPS/DNS to Clerk through its web network, and browsers must reach `https://clerk.spooktober.kylescudder.co.uk`. No auth container or user-table migration is needed. See [the runtime configuration guide](deployment.md#configure-clerk) for the access checks.
+
+## 3. Test with separate data before cutover
+
+Use a temporary hostname and separate test database through the existing provisioning/onboarding commands. Apply migrations with the migration role, apply runtime grants, and explicitly seed the sample list or import test data before starting the app. Set `PUBLIC_URL` to the exact test HTTPS origin and use a Clerk instance configured for that origin, with corresponding test-user IDs. Keep production keys/users separate from development users.
+
+Register the Caddy route through the platform interface, using the app's unique web-network alias and port 8080:
 
 ```caddyfile
-http://films.example.com {
+http://spooktober.kylescudder.co.uk {
     reverse_proxy spooktober:8080
 }
 ```
 
-The example assumes that alias was assigned on the shared web network. Use the platform's route-registration interface to validate/reload Caddy and register Cloudflare DNS/tunnel routing, preserving other sites.
+Use the temporary hostname in place of the final hostname for testing. Validate/reload routes through the existing commands, preserving other sites. Ensure the proxy retains session cookies, `Authorization`, `Origin`, `X-Spooktober-Request` and the external host/HTTPS information. Honor `Cache-Control: private, no-store` on authenticated pages/API. Public artwork and Next.js static files may be cached. Remove any old Basic Auth challenges at the proxy.
 
-Set `PUBLIC_URL` to the actual test HTTPS origin. Verify that the proxy retains `Authorization`, `Origin` and `X-Spooktober-Request`. Ensure Cloudflare honors `Cache-Control: private, no-store` for the app and has no cache-everything rule on its hostname.
+Verify anonymous page redirects and API 401 responses; real Clerk login/logout for Kyle and Rhiann; expired sessions; access-denied/403 responses for a separate uninvited account; no film data when Clerk configuration or allowed IDs are missing; initial film rows present in server-rendered HTML; add, tick/untick and drag ordering; saves in a second independent browser; and failed-save retry. Cross-origin writes must fail and legitimate public-origin writes must succeed. Recreate the app and restart the test database to verify persistence and recovery. Test writes must not touch production data.
 
-Check anonymous and wrong-password challenges for the page/assets/API, valid login, adding films, tick/untick, drag ordering, independent browser sessions and failed-save retry. Verify legitimate public-origin writes succeed and cross-origin writes fail. Recreate the container and confirm state remains; test temporary database unavailability and recovery. Record results before moving on.
+## 4. Import the real list and publish
 
-## 5. Import the real list and switch the address
+1. Coordinate a short pause in watchlist edits. Export the hosted list at `https://spooktober.kyle978041.chatgpt.site` immediately before cutover and transfer it privately. The local ignored `data/hosted-watchlist.json` is an earlier snapshot; refresh or compare it against this final export. Retain the final JSON as a recovery artifact.
+2. Keep the production app stopped while applying migrations, runtime grants and the JSON import to its empty database. Use `node database.cjs import -` for the existing list; seeding is only for a fresh start. The runtime guide provides the exact commands. Import refuses to overwrite a populated list.
+3. Compare every film ID, title, array order, watched flag and timestamp with the export. Timestamps normalize to UTC while preserving their full precision; unknown viewing dates remain `null`. The final export is authoritative, even if its counts differ from the original twenty films/three watched.
+4. Back up the imported PostgreSQL database through the platform command, confirm the off-host copy and restore into a separate test database. Compare the restored film data and remove only test resources.
+5. Register the final hostname, set its exact `PUBLIC_URL` and production Clerk keys/user IDs, and start the production image. Check authenticated reads and imported data before directing Kyle and Rhiann to the new address for edits.
+6. Verify saves between two independent sessions and persistence after app recreation. Undo intentional test edits and capture a post-cutover backup.
 
-1. Coordinate a short pause in watchlist edits. Export the hosted list immediately before cutover and transfer it privately. Kyle's ignored `data/hosted-watchlist.json` is an earlier snapshot and must be refreshed or checked against that final export. Retain the final JSON as a recovery artifact.
-2. Keep the normal production app stopped while running migrations and import into the empty production database with appropriate credentials. Do not start it with automatic seeding beforehand. Compare every ID, title, position, watched flag and timestamp against the export, including unknown viewing dates. The last known count was twenty films with three watched; the final export is authoritative.
-3. Take a production database dump through the platform backup command, confirm its off-host copy, and restore it into a separate test database. Compare restored film data and clean up only the test database.
-4. Register the final hostname through the platform, set the exact final `PUBLIC_URL`, and start the production image. Check authenticated read-only access and imported data first, then direct Kyle and Rhiann to the new address for edits.
-5. Verify saves synchronize between two independent browser sessions and survive container recreation. Restore any intentional test edits to their original values and capture a post-cutover backup.
+Keep the old hosted deployment available during acceptance. The databases do not synchronize automatically; after cutover, use the new address for edits. Retiring the hosted version is a separate follow-up.
 
-Keep the old hosted deployment available for reference during acceptance. Once edits begin on the new site, its database is authoritative; the old hosted list does not synchronize automatically. Retiring the old deployment is a later follow-up.
+## 5. Return the application handoff
 
-## 6. Recovery and application handoff
+Document the exact deployment, migration/grant, import/export, health/log and rollback commands under `/srv/apps/spooktober/`. Use the shared platform's per-project backups and recovery procedure.
 
-Use the shared platform's backup and restore commands for this project's database. Document the app's exact deploy, migration, import/export, log, health and rollback commands under `/srv/apps/spooktober/`, and update the repository runtime guide to match the PostgreSQL release.
+Keep the previous image and record schema compatibility before image rollback. Back up before schema changes. Before new edits, a failed cutover can use the retained export and old hosted address. After new edits, preserve the latest PostgreSQL data before recovery; an old snapshot must not overwrite it.
 
-Keep the previous image and record schema compatibility before an image rollback. Take a backup before schema changes. For a failed cutover before new edits, use the retained export and old hosted address. After the new site accepts edits, preserve its latest data before recovery; do not overwrite it with the old snapshot. Restores involving schema rollback must follow the platform runbook and the application's compatibility notes.
-
-Return the public URL, source revision or source-bundle checksum, deployed image digest, project configuration locations, database/role names, secret reference locations, backup/restore evidence and application runbook. Never include secret values.
+Return the public URL, source revision, image digest, configuration locations, database/role names, secret reference locations, backup/restore evidence and application runbook. Include no secret values.
 
 Spooktober is complete when:
 
-- [ ] The PostgreSQL build passes real-database tests and production uses the shared database.
-- [ ] Basic Auth protects the page/assets/API; authenticated public-origin writes succeed and cross-origin writes fail.
-- [ ] Add, tick/untick and drag ordering save and appear in a second independent session.
-- [ ] Concurrent changes preserve all films; recreation and database interruption do not lose state.
-- [ ] Imported data matches the final export, including ordering, dates and timestamps.
-- [ ] The app has no unintended host/public listener and uses its restricted runtime login.
-- [ ] Its off-host backup succeeds and a separate-database restore matches the data.
-- [ ] Release, migration, recovery and rollback commands are documented without changing shared infrastructure ownership.
+- [ ] The received Next.js/PostgreSQL release passes its checks and production uses the shared database.
+- [ ] Real Clerk login/logout works for Kyle and Rhiann; uninvited users and anonymous API requests are denied.
+- [ ] Missing configuration and expired sessions reveal no film data; legitimate origin writes work and cross-origin writes fail.
+- [ ] Add, tick/untick and ordering synchronize between two independent sessions.
+- [ ] Concurrent changes retain films; app recreation and database restart preserve state.
+- [ ] Imported data matches the final export, including order, dates and timestamps.
+- [ ] The runtime role is restricted and the app exposes no host/public listener.
+- [ ] Off-host backup and separate-database restore checks succeed.
+- [ ] Release, migration, recovery and rollback commands are documented.

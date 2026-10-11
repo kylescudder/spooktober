@@ -6,20 +6,27 @@ services:
     image: spooktober:local
     restart: unless-stopped
     env_file: .env
-    ports:
-      - "127.0.0.1:8080:8080"
-    volumes:
-      - spooktober-data:/data
+    networks:
+      web:
+        aliases: [spooktober]
+      database:
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    mem_limit: 64m
-    pids_limit: 64
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    mem_limit: 256m
+    pids_limit: 128
     logging:
       driver: json-file
       options:
         max-size: "1m"
         max-file: "2"
 
-volumes:
-  spooktober-data:
+networks:
+  web:
+    external: true
+    name: ${PLATFORM_WEB_NETWORK:-platform-web}
+  database:
+    external: true
+    name: ${PLATFORM_DB_NETWORK:-platform-db}

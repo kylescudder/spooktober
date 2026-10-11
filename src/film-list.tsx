@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { UserButton } from "@clerk/nextjs";
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -14,23 +15,11 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { type Film } from "@/lib/films";
 import { parseTitle, parseWatched, parseOrder, completeOrder } from "@/lib/validation";
 
-type SaveAction = { url: string; method: "POST" | "PATCH" | "PUT"; body: unknown };
+import { sendRequest, type SaveAction } from "@/lib/trpc";
 type OptimisticChange = (films: Film[]) => Film[];
 type WebTool = { name: string; title: string; description: string; inputSchema: object; annotations: { readOnlyHint: boolean; untrustedContentHint: boolean }; execute: (input: unknown) => unknown | Promise<unknown> };
 type ModelContext = { registerTool: (tool: WebTool, options: { signal: AbortSignal }) => void | Promise<void> };
 
-async function sendRequest(url: string, action?: SaveAction): Promise<Film[]> {
-  const response = await fetch(url, {
-    method: action?.method ?? "GET", credentials: "same-origin", cache: "no-store",
-    headers: action ? { "Content-Type": "application/json", "X-Spooktober-Request": "1" } : undefined,
-    body: action ? JSON.stringify(action.body) : undefined,
-  });
-  if (response.status === 401) throw new Error("Please reload the page to sign in again.");
-  let data: { films?: Film[]; error?: string };
-  try { data = await response.json(); } catch { throw new Error("The watchlist is temporarily unavailable. Please try again."); }
-  if (!response.ok || !Array.isArray(data.films)) throw new Error(data.error ?? "We couldn’t save the watchlist. Please try again.");
-  return data.films;
-}
 
 function FilmRow({ film, index, next, disabled, onWatched }: { film: Film; index: number; next: boolean; disabled: boolean; onWatched: (film: Film, watched: boolean) => void }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: film.id, disabled });
@@ -69,7 +58,7 @@ export function FilmList({ initialFilms }: { initialFilms: Film[] | null }) {
     if (busyRef.current || draggingRef.current || (retryRef.current && !manual)) return;
     const serial = ++requestSerial.current;
     try {
-      const next = await sendRequest("/api/films");
+      const next = await sendRequest();
       if (serial !== requestSerial.current || busyRef.current || draggingRef.current) return;
       applyFilms(next); setLoaded(true);
       if (!retryRef.current) setError(null);
@@ -86,7 +75,7 @@ export function FilmList({ initialFilms }: { initialFilms: Film[] | null }) {
     setSaving(true); setError(null); setRetry(null); retryRef.current = false;
     if (optimistic) applyFilms(optimistic(previous));
     try {
-      applyFilms(await sendRequest(action.url, action));
+      applyFilms(await sendRequest(action));
       setLoaded(true);
       return true;
     } catch (failure) {
@@ -97,7 +86,7 @@ export function FilmList({ initialFilms }: { initialFilms: Film[] | null }) {
     } finally { busyRef.current = false; setSaving(false); }
   }, [applyFilms]);
 
-  const markWatched = useCallback((film: Film, watched: boolean) => save({ url: `/api/films/${encodeURIComponent(film.id)}`, method: "PATCH", body: { watched } }, (current) => current.map((item) => item.id === film.id ? { ...item, watched } : item)), [save]);
+  const markWatched = useCallback((film: Film, watched: boolean) => save({ procedure: "setWatched", input: { id: film.id, watched } }, (current) => current.map((item) => item.id === film.id ? { ...item, watched } : item)), [save]);
 
   useEffect(() => {
     setHydrated(true);
@@ -127,12 +116,12 @@ export function FilmList({ initialFilms }: { initialFilms: Film[] | null }) {
     } });
     register({ name: "reorder_films", title: "Reorder our films", description: "Save the viewing order using film identifiers, retaining any newly added films.", inputSchema: { type: "object", properties: { ids: { type: "array", items: { type: "string" }, minItems: 1, uniqueItems: true } }, required: ["ids"], additionalProperties: false }, annotations: writeAnnotations, execute: async (input) => {
       const ids = completeOrder(parseOrder(input), filmsRef.current.map((film) => film.id));
-      if (!await save({ url: "/api/films/order", method: "PUT", body: { ids } }, (current) => ids.map((id, position) => ({ ...current.find((film) => film.id === id)!, position })))) throw new Error("The order could not be saved. Please retry.");
+      if (!await save({ procedure: "reorder", input: { ids } }, (current) => ids.map((id, position) => ({ ...current.find((film) => film.id === id)!, position })))) throw new Error("The order could not be saved. Please retry.");
       return { ids: filmsRef.current.map((film) => film.id), saved: true };
     } });
     register({ name: "add_film", title: "Add a film", description: "Add a film to the end of the shared watchlist and update the visible list.", inputSchema: { type: "object", properties: { title: { type: "string", minLength: 1, maxLength: 200 } }, required: ["title"], additionalProperties: false }, annotations: writeAnnotations, execute: async (input) => {
       const name = parseTitle(input); const id = crypto.randomUUID();
-      if (!await save({ url: "/api/films", method: "POST", body: { id, title: name } })) throw new Error("The film could not be saved. Please retry.");
+      if (!await save({ procedure: "add", input: { id, title: name } })) throw new Error("The film could not be saved. Please retry.");
       return { id, title: name, saved: true };
     } });
     return () => lifecycle.abort();
@@ -151,7 +140,7 @@ export function FilmList({ initialFilms }: { initialFilms: Film[] | null }) {
     const to = current.findIndex((film) => film.id === over.id);
     if (from < 0 || to < 0) return;
     const reordered = arrayMove(current, from, to).map((film, position) => ({ ...film, position }));
-    await save({ url: "/api/films/order", method: "PUT", body: { ids: reordered.map((film) => film.id) } }, () => reordered);
+    await save({ procedure: "reorder", input: { ids: reordered.map((film) => film.id) } }, () => reordered);
   }
 
   async function submitFilm(event: FormEvent) {
@@ -159,14 +148,14 @@ export function FilmList({ initialFilms }: { initialFilms: Film[] | null }) {
     let name: string;
     try { name = parseTitle({ title }); } catch (failure) { setTitleError((failure as Error).message); return; }
     setTitleError(null);
-    if (await save({ url: "/api/films", method: "POST", body: { id: crypto.randomUUID(), title: name } })) { setTitle(""); setAddOpen(false); }
+    if (await save({ procedure: "add", input: { id: crypto.randomUUID(), title: name } })) { setTitle(""); setAddOpen(false); }
   }
 
   return (
     <main className="watchlist-page">
       <header className="masthead">
         <span className="our-names"><Clapperboard size={17} /> Kyle & Rhiann</span>
-        <span className="season"><Moon size={14} /> Halloween film nights</span>
+        <div className="masthead-account"><span className="season"><Moon size={14} /> Halloween film nights</span><UserButton /></div>
       </header>
       <section className="intro" aria-labelledby="page-title">
         <div className="intro-copy">
@@ -180,7 +169,7 @@ export function FilmList({ initialFilms }: { initialFilms: Film[] | null }) {
         <div className="progress-copy"><span><strong>{watched}</strong> of {films.length} films watched</span><span>{films.length - watched} to go</span></div>
         <Progress value={films.length ? watched / films.length * 100 : 0} aria-label={`${watched} of ${films.length} films watched`} />
       </section>
-      {error && <div className="save-error" role="alert"><AlertCircle size={18} /><span>{error}</span><Button variant="ghost" disabled={saving} onClick={() => retry ? void save(retry.action, retry.optimistic).then((ok) => { if (ok && retry.action.method === "POST") { setTitle(""); setAddOpen(false); } }) : void refresh(true)}><RefreshCw size={14} /> Retry</Button></div>}
+      {error && <div className="save-error" role="alert"><AlertCircle size={18} /><span>{error}</span><Button variant="ghost" disabled={saving} onClick={() => retry ? void save(retry.action, retry.optimistic).then((ok) => { if (ok && retry.action.procedure === "add") { setTitle(""); setAddOpen(false); } }) : void refresh(true)}><RefreshCw size={14} /> Retry</Button></div>}
       <section className="lineup" aria-labelledby="lineup-title" aria-busy={saving}>
         <div className="lineup-toolbar">
           <div><h2 id="lineup-title">Our line-up <span>{films.length}</span></h2><p>Drag to reorder. Tick when the credits roll.</p></div>

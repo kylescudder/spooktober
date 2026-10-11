@@ -1,8 +1,4 @@
-export interface Film {
-  id: string;
-  title: string;
-  position: number;
-  watched: boolean;
-  watchedAt: string | null;
-  updatedAt: string;
-}
+import type { z } from "zod";
+import type { filmSchema } from "./validation";
+
+export type Film = z.infer<typeof filmSchema>;
