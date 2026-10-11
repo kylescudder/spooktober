@@ -1,0 +1,72 @@
+import "server-only";
+import { createReadStream } from "node:fs";
+import { open, rename, rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
+import type { Film } from "../lib/films.ts";
+import { watchlistImportSchema } from "../lib/validation.ts";
+
+// Date only has millisecond precision; retain the original fractional seconds.
+export function normalizeTimestamp(value: unknown): string {
+  if (typeof value !== "string") throw new Error("Import contains an invalid film timestamp.");
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  if (!match) throw new Error("Import contains an invalid film timestamp.");
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, fraction = "", zone] = match;
+  const year = Number(yearText), month = Number(monthText), day = Number(dayText);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (month < 1 || month > 12 || day < 1 || day > days[month - 1] || Number(hourText) > 23 || Number(minuteText) > 59 || Number(secondText) > 59 || (zone !== "Z" && (Number(zone.slice(1, 3)) > 23 || Number(zone.slice(4)) > 59))) {
+    throw new Error("Import contains an invalid film timestamp.");
+  }
+  const date = new Date(`${yearText}-${monthText}-${dayText}T${hourText}:${minuteText}:${secondText}${zone}`);
+  if (!Number.isFinite(date.getTime())) throw new Error("Import contains an invalid film timestamp.");
+  const precision = fraction.replace(/0+$/, "");
+  return `${date.toISOString().split(".")[0]}${precision ? `.${precision}` : ""}Z`;
+}
+
+export function parseWatchlist(data: Uint8Array | string): Film[] {
+  if (Buffer.byteLength(data) > 1024 * 1024) throw new Error("Watchlist import exceeds 1 MiB.");
+  let input: unknown;
+  try { input = JSON.parse(typeof data === "string" ? data : Buffer.from(data).toString("utf8")); }
+  catch { throw new Error("Import must contain valid watchlist JSON."); }
+  const parsed = watchlistImportSchema.safeParse(input);
+  if (!parsed.success) throw new Error("Import must contain valid films with IDs, titles, watched flags and timestamps (at most 1000 films).");
+  const films = parsed.data.films;
+  const seen = new Set<string>();
+  return films.map((film, position): Film => {
+    if (seen.has(film.id)) throw new Error("Import contains a repeated film.");
+    seen.add(film.id);
+    const watchedAt = film.watchedAt == null ? null : normalizeTimestamp(film.watchedAt);
+    if (!film.watched && watchedAt !== null) throw new Error("An unwatched film cannot have a watched date.");
+    const updatedAt = film.updatedAt === undefined || film.updatedAt === "" ? new Date().toISOString() : normalizeTimestamp(film.updatedAt);
+    const createdAt = film.createdAt === undefined || film.createdAt === "" ? updatedAt : normalizeTimestamp(film.createdAt);
+    return { id: film.id, title: film.title, position, watched: film.watched, watchedAt, updatedAt, createdAt };
+  });
+}
+
+export async function readWatchlist(source: string): Promise<Film[]> {
+  const stream = source === "-" ? process.stdin : createReadStream(source);
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of stream) {
+    const bytes = Buffer.from(chunk);
+    size += bytes.byteLength;
+    if (size > 1024 * 1024) throw new Error("Watchlist import exceeds 1 MiB.");
+    chunks.push(bytes);
+  }
+  return parseWatchlist(Buffer.concat(chunks));
+}
+
+export async function exportWatchlist(films: Film[], destination: string) {
+  const data = `${JSON.stringify({ films }, null, 2)}\n`;
+  if (destination === "-") {
+    await new Promise<void>((resolve, reject) => process.stdout.write(data, (error) => error ? reject(error) : resolve()));
+    return;
+  }
+  const temporary = join(dirname(destination), `.spooktober-export-${randomUUID()}`);
+  try {
+    const file = await open(temporary, "wx", 0o600);
+    try { await file.writeFile(data); await file.sync(); } finally { await file.close(); }
+    await rename(temporary, destination);
+  } finally { await rm(temporary, { force: true }); }
+}
