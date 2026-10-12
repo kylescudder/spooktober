@@ -27,7 +27,7 @@ compose.dev.yaml             # Local app and development PostgreSQL
 
 ## Sign-in with Clerk
 
-The Spooktober Clerk application has development and production instances, with accounts for **kyle@thescudders.org** and **rhiann@thescudders.org** in each. Both instances use email-code sign-in, with passwords, social sign-in and public registration disabled. Production is configured for **spooktober.kylescudder.co.uk**; its DNS and certificates remain to be completed in [the Spooktober setup plan](docs/spooktober-setup-plan.md#clerk-already-provisioned).
+The Spooktober Clerk application has development and production instances, with accounts for **kyle@thescudders.org** and **rhiann@thescudders.org** in each. Both instances use email-code sign-in, with passwords, social sign-in and public registration disabled. Production is configured for **spooktober.kylescudder.co.uk**; see [Clerk configuration](deploy/README.md#clerk-configuration) for the existing instances and production DNS/certificate checks.
 
 This checkout's development keys and user IDs are saved in private `.env`. The private `.env.clerk.production` holds production Clerk keys, production user IDs and `PUBLIC_URL`; merge it into the server's protected runtime configuration when deploying. It does not contain database credentials and Next.js does not load that filename automatically. Neither file is committed or included in Docker builds. On a fresh checkout, obtain these values privately from the existing Clerk application. The app permits one or two exact `user_...` IDs and rejects missing, malformed or duplicate entries. Production users have different IDs from development users.
 
@@ -35,7 +35,7 @@ The app has a cosy `/sign-in` page and an account menu with sign-out. An authent
 
 Missing keys show a setup message and deny film API access. There is no Basic Auth fallback or automatic creation of a Clerk application. Builds require neither Clerk keys nor database access; the Docker image receives configuration at startup. Only the publishable key is sent to the browser. **The app and film database are self-hosted; Clerk hosts identity and sessions.** Live login needs network access to Clerk.
 
-See [the Clerk setup steps in deployment instructions](docs/deployment.md#configure-clerk) before production release.
+See [runtime configuration](deploy/README.md#runtime-configuration) and [Clerk configuration](deploy/README.md#clerk-configuration) before production release.
 
 ## Run locally with Docker
 
@@ -87,10 +87,9 @@ Create the control database once. Tests cover migrations, restricted runtime per
 
 ## Self-hosting
 
-1. [Hermes: configure the shared infrastructure](docs/hermes-infrastructure-plan.md): PostgreSQL, Docker Compose, Caddy, Cloudflare Tunnel and backups, including static and server-rendered Astro support from the initial delivery.
-2. [Set up Spooktober](docs/spooktober-setup-plan.md): provision its database, run migrations, import the film list and publish this Next.js app on that platform.
+Production runs on Herman (ARM macOS with Colima), using the shared PostgreSQL server, Caddy and Cloudflare Tunnel. The [Herman operating guide](deploy/README.md) contains runtime configuration, deployment, database maintenance and recovery instructions; shared infrastructure is maintained in `/Users/kyle/platform/runbook.md`.
 
-Production runs one Next.js container using the shared PostgreSQL server. It joins the platform's existing web/database networks and publishes no host port. The image uses Next.js standalone output, with a 256 MiB container limit and a four-connection database pool. See [deployment instructions](docs/deployment.md) for the exact commands and runtime configuration. Pushes to `main` are checked, published to GHCR and deployed to Herman by GitHub Actions ([CI and releases](docs/deployment.md#continuous-integration-and-releases), [Herman deploy handover](docs/herman-deploy-handover.md)). No Vercel account is needed.
+One Next.js container joins the platform's existing web/database networks and publishes no host port. The image uses Next.js standalone output, with a 256 MiB container limit and a four-connection database pool. Pushes to `main` are checked, published to GHCR and deployed to Herman by GitHub Actions; see [CI and releases](deploy/README.md#continuous-integration-and-releases).
 
 The PostgreSQL schema is unchanged by this framework migration. Existing PostgreSQL data can be used directly. For the old hosted watchlist, refresh the private JSON export before cutover and import it into an empty migrated database.
 
