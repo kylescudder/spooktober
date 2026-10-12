@@ -5,7 +5,6 @@ node_modules
 **/.env*
 data
 artifacts
-docs
 deploy
 .next
 out
