@@ -272,7 +272,7 @@ docker compose exec -T spooktober node database.cjs export - > watchlist-backup.
 ```
 
 Check the export's exit status before using it as a backup. Restore by importing
-into an empty migrated database. Local source commands use `npm run db --` with
+into an empty migrated database. Local source commands use `bun run db` with
 the same `migrate`, `seed`, `import` and `export` arguments. For local PostgreSQL
 and app startup, follow the [root README](../README.md#run-locally-with-docker).
 
