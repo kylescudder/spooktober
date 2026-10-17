@@ -1,13 +1,16 @@
 # syntax=docker/dockerfile:1
+FROM oven/bun:1.4.2-alpine AS bun
+
 FROM node:22-alpine AS build
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
-COPY package*.json ./
-RUN npm ci --no-audit --no-fund
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
 COPY next.config.ts postcss.config.mjs tsconfig.json ./
 COPY src/ ./src/
 COPY public/ ./public/
-RUN npm run typecheck && npm test && npm run build
+RUN bun run typecheck && bun run test && bun run build
 
 FROM node:22-alpine AS runtime
 WORKDIR /app
