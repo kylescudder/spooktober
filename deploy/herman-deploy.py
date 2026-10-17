@@ -174,7 +174,7 @@ def deploy(digest, requested_revision=None):
     migration = ['docker', 'run', '--rm', '--read-only', '--cap-drop', 'ALL', '--security-opt',
                  'no-new-privileges:true', '--network', db_network, '--env-file', str(APP / '.env.migration'), candidate]
     run([*migration, 'node', 'database.cjs', 'migrate'])
-    grants = "GRANT USAGE ON SCHEMA public TO proj_spooktober_runtime; GRANT SELECT ON public.schema_migrations TO proj_spooktober_runtime; REVOKE INSERT, UPDATE, DELETE ON public.schema_migrations FROM proj_spooktober_runtime; GRANT SELECT, INSERT, UPDATE ON public.films TO proj_spooktober_runtime; REVOKE DELETE ON public.films FROM proj_spooktober_runtime;"
+    grants = "GRANT USAGE ON SCHEMA public TO spooktober_runtime; GRANT SELECT ON public.schema_migrations TO spooktober_runtime; REVOKE INSERT, UPDATE, DELETE ON public.schema_migrations FROM spooktober_runtime; GRANT SELECT, INSERT, UPDATE ON public.films TO spooktober_runtime; REVOKE DELETE ON public.films FROM spooktober_runtime;"
     js = "const {Client}=require('pg'); const c=new Client({connectionString:process.env.DATABASE_URL}); (async()=>{await c.connect();try{await c.query(process.argv[1])}finally{await c.end()}})().catch(()=>process.exit(1));"
     run([*migration, 'node', '-e', js, grants])
     log('migrations and runtime grants applied')
