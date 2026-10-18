@@ -51,9 +51,9 @@ docker compose -f compose.dev.yaml up -d spooktober
 
 Open <http://localhost:8080>. Seed once for a fresh list, or use `node database.cjs import -` with an exported JSON list instead. Seed/import refuse to replace populated data. Normal startup applies neither migrations nor seed data. `docker compose -f compose.dev.yaml down` retains the development database volume.
 
-## Develop with Node.js
+## Develop with Bun
 
-Use Node.js 22.13 or newer. Start only the local PostgreSQL service above, run `npm ci`, and set the following development connection in your private `.env`, alongside your Clerk settings:
+Use Bun 1.4.2 for package management and Node.js 22.13 or newer for the app and test runtime. Start only the local PostgreSQL service above, run `bun install --frozen-lockfile`, and set the following development connection in your private `.env`, alongside your Clerk settings:
 
 ```dotenv
 DATABASE_URL=postgres://spooktober_owner:local-development-only@127.0.0.1:54329/spooktober?sslmode=disable
@@ -61,26 +61,26 @@ PUBLIC_URL=
 ```
 
 ```sh
-npm run db -- migrate
-npm run db -- seed
-npm run dev
+bun run db migrate
+bun run db seed
+bun run dev
 ```
 
-Skip seed if the database already contains your list. Next.js serves the page and tRPC from <http://localhost:8080>; no separate backend process is needed. `npm run build` and `npm start` run a production build locally. Database credentials remain server-only and are read at runtime, so building requires no PostgreSQL connection.
+Skip seed if the database already contains your list. Next.js serves the page and tRPC from <http://localhost:8080>; no separate backend process is needed. `bun run build` and `bun run start` run a production build locally. Database credentials remain server-only and are read at runtime, so building requires no PostgreSQL connection.
 
 ## Checks
 
 ```sh
-npm run typecheck
-npm test
-npm run build
+bun run typecheck
+bun run test
+bun run build
 ```
 
 Integration tests require a disposable PostgreSQL cluster with a privileged test login. They create uniquely named databases; the control database must end in `_test`. With the local development cluster:
 
 ```sh
 docker compose -f compose.dev.yaml exec postgres createdb -U spooktober_owner spooktober_test
-TEST_DATABASE_URL='postgres://spooktober_owner:local-development-only@127.0.0.1:54329/spooktober_test?sslmode=disable' npm run test:integration
+TEST_DATABASE_URL='postgres://spooktober_owner:local-development-only@127.0.0.1:54329/spooktober_test?sslmode=disable' bun run test:integration
 ```
 
 Create the control database once. Tests cover migrations, restricted runtime permissions, typed tRPC transport, trusted-session access policy and origin protection, simultaneous changes across pools, and atomic JSON import/export with timestamp precision. The image build runs type checks and database-independent tests; run integration checks before releasing. These tests exercise the server access policy with trusted session fixtures; verify real Clerk login, logout and session expiry separately with configured keys.
