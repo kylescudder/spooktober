@@ -17,7 +17,7 @@
     "db": "node --conditions=react-server --import tsx --import ./src/server/load-env.mjs src/server/cli.ts"
   },
   "dependencies": {
-    "@clerk/nextjs": "7.9.14",
+    "@clerk/nextjs": "7.9.17",
     "@dnd-kit/core": "6.3.1",
     "@dnd-kit/sortable": "10.0.0",
     "@dnd-kit/utilities": "3.2.2",
