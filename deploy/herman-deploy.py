@@ -19,6 +19,11 @@ APP = Path(os.environ.get('APP_DIR', Path(__file__).resolve().parents[1]))
 STATE = APP / 'state'
 BACKUPS = APP / 'backups'
 REQUESTS = APP / 'deploy-spool/requests'
+# Read-only to the receiver, which serves it to GitHub as sanitized release status.
+STATUS = APP / 'deploy-spool/status'
+# Database `spooktober` has roles spooktober_owner (migrations) and spooktober_runtime (the app).
+RUNTIME_ROLE = 'spooktober_runtime'
+KEEP_STATUS = 50
 
 
 class Error(RuntimeError):
@@ -75,6 +80,42 @@ def save_json(path, value):
     temp.replace(path)
 
 
+class Progress:
+    """Sanitized release status for GitHub: fixed phases only, never command output."""
+
+    def __init__(self, digest, revision, requested=None):
+        self.digest, self.revision, self.requested = digest, revision, requested
+        self.phase, self.rollback = 'accepted', None
+
+    def publish(self, status, phase=None):
+        if phase:
+            self.phase = phase
+        if self.revision:
+            write_status(self.digest, self.revision, status, self.phase, self.rollback, self.requested)
+
+
+def status_path(digest, revision):
+    return STATUS / f'{revision}-{digest.removeprefix("sha256:")}.json'
+
+
+def write_status(digest, revision, status, phase, rollback=None, requested=None):
+    value = {'digest':digest, 'revision':revision, 'status':status, 'phase':phase,
+             'updated_at':datetime.now(timezone.utc).isoformat()}
+    if rollback:
+        value['rollback'] = rollback
+    if requested:
+        value['requested'] = requested
+    try:
+        STATUS.mkdir(mode=0o700, parents=True, exist_ok=True)
+        save_json(status_path(digest, revision), value)
+        stale = sorted(STATUS.glob('*.json'), key=lambda path:path.stat().st_mtime, reverse=True)[KEEP_STATUS:]
+        for old in stale:
+            old.unlink(missing_ok=True)
+    except OSError:
+        # Reporting must never interrupt a deployment; GitHub then times out instead.
+        log('could not publish release status')
+
+
 def take_request():
     # Consume this snapshot only. Arrivals during deployment start the next run.
     if REQUESTS.is_symlink() or REQUESTS.parent.is_symlink():
@@ -103,6 +144,9 @@ def take_request():
     selected = max(valid, key=lambda entry:entry[:2])[2] if valid else None
     if selected:
         save_json(STATE / 'last-request.json', selected)
+    for _, _, other in valid:
+        if selected and (other['digest'], other['revision']) != (selected['digest'], selected['revision']):
+            write_status(other['digest'], other['revision'], 'superseded', 'queued', requested=other['timestamp'])
     for path in paths:
         if path.is_dir() and not path.is_symlink():
             path.rename(STATE / ('rejected-directory-' + uuid.uuid4().hex))
@@ -124,7 +168,15 @@ def start(image):
     compose('up', '-d', '--no-build', '--pull', 'never', '--wait', '--wait-timeout', '120', 'spooktober', image=image)
 
 
-def deploy(digest, requested_revision=None):
+def migration_commands(candidate, db_network):
+    """Owner commands run inside the candidate image; every dependency is in the bundled CLI."""
+    base = ['docker', 'run', '--rm', '--read-only', '--cap-drop', 'ALL', '--security-opt',
+            'no-new-privileges:true', '--network', db_network, '--env-file', str(APP / '.env.migration'), candidate]
+    return [[*base, 'node', 'database.cjs', 'migrate'], [*base, 'node', 'database.cjs', 'grant', RUNTIME_ROLE]]
+
+
+def deploy(digest, requested_revision=None, progress=None):
+    progress = progress or Progress(digest, None)
     if not DIGEST.fullmatch(digest):
         raise Error('Use an exact sha256 digest.')
     runtime = private_env(APP / '.env')
@@ -141,7 +193,9 @@ def deploy(digest, requested_revision=None):
             raise Error('Running image revision does not match the request.')
         log('requested digest is already healthy')
         pin(candidate)
+        progress.publish('succeeded', 'complete')
         return
+    progress.publish('running', 'verify')
     log(f'verifying {candidate}')
     run(['gh', 'attestation', 'verify', f'oci://{candidate}', '--bundle-from-oci', '--repo', REPO,
          '--signer-workflow', REPO + '/.github/workflows/release.yml', '--source-ref', 'refs/heads/main',
@@ -153,6 +207,7 @@ def deploy(digest, requested_revision=None):
         raise Error('Verified image revision does not match the request.')
     log(f'provenance verified for {revision}')
     if current and current['State']['Running']:
+        progress.publish('running', 'backup')
         stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
         backup = BACKUPS / f'pre-deploy-{stamp}.json'
         partial = backup.with_suffix('.json.partial')
@@ -171,25 +226,29 @@ def deploy(digest, requested_revision=None):
     db_network = runtime.get('PLATFORM_DB_NETWORK', 'platform-db')
     if not re.fullmatch(r'[a-zA-Z0-9_-]+', db_network):
         raise Error('Invalid database network.')
-    migration = ['docker', 'run', '--rm', '--read-only', '--cap-drop', 'ALL', '--security-opt',
-                 'no-new-privileges:true', '--network', db_network, '--env-file', str(APP / '.env.migration'), candidate]
-    run([*migration, 'node', 'database.cjs', 'migrate'])
-    grants = "GRANT USAGE ON SCHEMA public TO proj_spooktober_runtime; GRANT SELECT ON public.schema_migrations TO proj_spooktober_runtime; REVOKE INSERT, UPDATE, DELETE ON public.schema_migrations FROM proj_spooktober_runtime; GRANT SELECT, INSERT, UPDATE ON public.films TO proj_spooktober_runtime; REVOKE DELETE ON public.films FROM proj_spooktober_runtime;"
-    js = "const {Client}=require('pg'); const c=new Client({connectionString:process.env.DATABASE_URL}); (async()=>{await c.connect();try{await c.query(process.argv[1])}finally{await c.end()}})().catch(()=>process.exit(1));"
-    run([*migration, 'node', '-e', js, grants])
+    progress.publish('running', 'migrate')
+    migrate, grant = migration_commands(candidate, db_network)
+    run(migrate)
+    progress.publish('running', 'grant')
+    run(grant)
     log('migrations and runtime grants applied')
+    progress.publish('running', 'start')
     try:
         start(candidate)
     except Error:
         log('candidate failed health check')
+        progress.phase = 'health'
         if running and running != candidate:
             try:
                 start(running)
                 pin(running)
+                progress.rollback = 'restored'
                 log('previous image restored; migrations are not reverted')
             except Error:
+                progress.rollback = 'failed'
                 raise Error('ROLLBACK FAILED; inspect the private deployment logs.') from None
         else:
+            progress.rollback = 'stopped'
             compose('stop', 'spooktober', image=candidate)
         raise Error('Candidate was not healthy; deploy failed.') from None
     pin(candidate)
@@ -197,12 +256,13 @@ def deploy(digest, requested_revision=None):
     with (STATE / 'history.log').open('a') as stream:
         stream.write(f'{stamp} {candidate} {revision}\n')
     save_json(STATE / 'deployment.json', {'deployed_at':stamp, 'image':candidate, 'revision':revision})
+    progress.publish('succeeded', 'complete')
     log(f'healthy on {candidate}')
 
 
 def main():
     os.umask(0o077)
-    for folder in (STATE, BACKUPS, REQUESTS):
+    for folder in (STATE, BACKUPS, REQUESTS, STATUS):
         folder.mkdir(mode=0o700, parents=True, exist_ok=True)
     with (STATE / 'deploy.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -212,11 +272,15 @@ def main():
         if request is None:
             log('no queued requests')
             return
+        progress = Progress(request['digest'], request.get('revision'), request.get('timestamp'))
         try:
-            deploy(request['digest'], request.get('revision'))
-        except Error as error:
+            progress.publish('running')
+            deploy(request['digest'], request.get('revision'), progress)
+        except Exception as error:
+            message = str(error) if isinstance(error, Error) else f'Deploy failed: {type(error).__name__}.'
             save_json(STATE / 'last-failure.json', {'failed_at':datetime.now(timezone.utc).isoformat(),
-                      'digest':request['digest'], 'error':str(error)})
+                      'digest':request['digest'], 'error':message})
+            progress.publish('failed')
             raise
 
 

@@ -10,7 +10,7 @@ if subprocess.check_output(['/usr/sbin/scutil', '--get', 'LocalHostName']).decod
     raise SystemExit('This installer targets Herman only.')
 os.umask(0o077)
 label = 'com.herman.spooktober-deploy'
-for name in ('state', 'backups', 'deploy-spool/requests', 'deploy-spool/tmp'):
+for name in ('state', 'backups', 'deploy-spool/requests', 'deploy-spool/status', 'deploy-spool/tmp'):
     (app / name).mkdir(parents=True, mode=0o700, exist_ok=True)
 value = {'Label':label, 'ProgramArguments':['/usr/bin/python3', '-B', str(app / 'deploy/herman-deploy.py')],
          'WorkingDirectory':str(app), 'EnvironmentVariables':{'PATH':'/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin',
