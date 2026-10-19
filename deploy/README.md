@@ -12,8 +12,8 @@ for the shared platform. This file owns the application's deployment commands.
 | Image repository | `ghcr.io/kylescudder/spooktober`, public |
 | App hostname | `spooktober.kylescudder.co.uk` |
 | App upstream | `spooktober:8080` on `platform-web` |
-| Database | `proj_spooktober`, private `postgres:5432` on internal `platform-db` |
-| Database roles | `proj_spooktober_owner` for migrations, `proj_spooktober_runtime` for the app |
+| Database | `spooktober`, private `postgres:5432` on internal `platform-db` |
+| Database roles | `spooktober_owner` for migrations, `spooktober_runtime` for the app |
 | Hook hostname/path | `deploy.kylescudder.co.uk/hooks/spooktober` |
 | Hook upstream | `spooktober-deploy-hook:9000` on `platform-web` only |
 | Host trigger | launchd `com.herman.spooktober-deploy`, `QueueDirectories` |
