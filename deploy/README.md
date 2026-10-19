@@ -73,7 +73,7 @@ in `.env.migration`:
 | Setting | Value |
 | --- | --- |
 | `DATABASE_URL` | Restricted runtime login for `proj_spooktober` |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Production instance's public `pk_live_...` key |
+| `CLERK_PUBLISHABLE_KEY` | Production instance's public `pk_live_...` key |
 | `CLERK_SECRET_KEY` | Same instance's private `sk_live_...` key |
 | `CLERK_ALLOWED_USER_IDS` | Kyle and Rhiann's exact production user IDs, comma separated |
 | `PUBLIC_URL` | `https://spooktober.kylescudder.co.uk` |
@@ -83,7 +83,7 @@ in `.env.migration`:
 Percent-encode special characters in database URL credentials. `sslmode=disable`
 is for the private Docker database network; use the endpoint's required TLS
 configuration elsewhere. Only the Clerk publishable key reaches the browser.
-All settings are read at runtime; build arguments contain no credentials.
+The legacy `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` name is also accepted, so existing runtime files need no immediate change. All settings are read at runtime; build arguments contain no credentials.
 
 The image listens on `0.0.0.0:8080`, with a 256 MiB container limit, a 128 MiB
 JavaScript heap and four database connections. Its filesystem is read-only with
@@ -105,7 +105,7 @@ The app accepts one or two exact `user_...` IDs and denies film access for missi
 malformed or duplicate entries. Keep development and production keys/users separate.
 
 Local private `.env.clerk.production` is auth configuration only and is not loaded
-automatically by Next.js. Merge its values with the host's protected database/network
+automatically by the app. Merge its values with the host's protected database/network
 configuration; the deployed copy is retained in `secrets/clerk-production.env`.
 
 The production CNAME records are listed below. Check them against the existing
@@ -226,7 +226,7 @@ Anonymous requests reveal no film data.
 Preserve session cookies, `Authorization`, `Origin`, `X-Spooktober-Request` and
 the external host/forwarded HTTPS information. Honor private/no-store caching for
 HTML and `/api/trpc`; bypass Cloudflare caching for authenticated pages and API
-responses. Public artwork and Next.js static assets may be cached. The app uses
+responses. Public artwork and Vite static assets may be cached. The app uses
 Clerk directly; additional Basic Auth challenges interfere with sign-in.
 
 ## Database maintenance

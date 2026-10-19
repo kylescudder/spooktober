@@ -1,4 +1,4 @@
-import "server-only";
+import "@tanstack/react-start/server-only";
 
 export const privateHeaders = {
   "Cache-Control": "private, no-store",
@@ -26,7 +26,7 @@ export function configuration(env: Record<string, string | undefined> = process.
 // Read through a server-only environment object at request time. The public key
 // is passed to Clerk explicitly, so a single Docker image works across instances.
 export function clerkConfiguration(env: Record<string, string | undefined> = process.env) {
-  const publishableKey = env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
+  const publishableKey = env.CLERK_PUBLISHABLE_KEY ?? env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
   const secretKey = env.CLERK_SECRET_KEY ?? "";
   const mode = /^pk_(test|live)_[a-zA-Z0-9+/]+={0,2}$/.exec(publishableKey)?.[1];
   const configured = !!mode && secretKey.startsWith(`sk_${mode}_`) && !secretKey.includes("replace");

@@ -26,6 +26,14 @@ test("missing or malformed access configuration fails closed", () => {
   assert.equal(clerkConfiguration({ NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "replace-with-publishable-key" }).configured, false);
 });
 
+test("runtime Clerk keys support the existing deployment name and prefer the new name", () => {
+  const legacy = { NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ZXhhbXBsZS5jbGVyay5hY2NvdW50cy5kZXYk", CLERK_SECRET_KEY: "sk_test_fixture" };
+  assert.equal(clerkConfiguration(legacy).configured, true);
+  assert.equal(clerkConfiguration({ ...legacy, CLERK_PUBLISHABLE_KEY: legacy.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }).configured, true);
+  assert.equal(clerkConfiguration({ ...legacy, CLERK_PUBLISHABLE_KEY: "invalid" }).configured, false);
+  assert.equal(clerkConfiguration({ ...legacy, CLERK_SECRET_KEY: "sk_live_fixture" }).configured, false);
+});
+
 test("every tRPC procedure independently rejects signed-out and uninvited sessions before storage", async (t) => {
   const previous = process.env.CLERK_ALLOWED_USER_IDS;
   process.env.CLERK_ALLOWED_USER_IDS = "user_Kyle,user_Rhiann";

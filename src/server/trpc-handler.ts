@@ -1,9 +1,9 @@
-import "server-only";
+import "@tanstack/react-start/server-only";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { accessFailure, guardMutationRequest, privateHeaders } from "./auth.ts";
 import { appRouter } from "./trpc.ts";
 
-// The Next.js route supplies Clerk's server session resolver. Tests can exercise
+// The TanStack Start route supplies Clerk's server session resolver. Tests can exercise
 // transport and access policy without a live Clerk account or an auth bypass.
 export function createTrpcHandler(resolveUserId: () => Promise<string | null>) {
   return async function trpcHandler(request: Request): Promise<Response> {

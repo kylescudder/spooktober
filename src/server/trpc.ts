@@ -1,4 +1,4 @@
-import "server-only";
+import "@tanstack/react-start/server-only";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { ZodError } from "zod";
 import { addFilmSchema, filmSchema, FilmError, orderSchema, setWatchedSchema } from "../lib/validation.ts";
