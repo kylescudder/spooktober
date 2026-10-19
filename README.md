@@ -1,6 +1,6 @@
 # Spooktober
 
-Kyle and Rhiann's shared Halloween film watchlist. **Next.js + React + TypeScript, tRPC, Zod and PostgreSQL.** One application lives in `src/`; one Node.js process renders the page and handles film changes.
+Kyle and Rhiann's shared Halloween film watchlist. **TanStack Start + TanStack Router + React + TypeScript, tRPC, Zod and PostgreSQL.** One application lives in `src/`; one Node.js process renders the page and handles film changes.
 
 - Cosy pumpkin-and-candle styling, with phone and keyboard controls.
 - The current film list is rendered on the server; React handles dragging, checkboxes and adding films.
@@ -12,8 +12,8 @@ Kyle and Rhiann's shared Halloween film watchlist. **Next.js + React + TypeScrip
 
 ```text
 src/
-  app/                       # Next.js page, layout, tRPC endpoint and health route
-  proxy.ts                   # Clerk session middleware and request protection
+  routes/                    # TanStack Router pages, tRPC endpoint and health route
+  router.tsx, start.ts        # Router and request middleware configuration
   film-list.tsx              # Interactive React watchlist
   server/                    # PostgreSQL, tRPC router, maintenance commands and tests
   lib/, components/          # Shared Zod schemas, typed client and UI components
@@ -22,18 +22,18 @@ src/
 public/                      # Artwork and favicon for this app
 Dockerfile, compose.yaml     # Production app using the shared platform
 compose.dev.yaml             # Local app and development PostgreSQL
-.next/                       # Generated Next.js build, ignored by Git
+.output/                     # Generated Nitro production server and assets, ignored by Git
 ```
 
 ## Sign-in with Clerk
 
 The Spooktober Clerk application has development and production instances, with accounts for **kyle@thescudders.org** and **rhiann@thescudders.org** in each. Both instances use email-code sign-in, with passwords, social sign-in and public registration disabled. Production is configured for **spooktober.kylescudder.co.uk**; see [Clerk configuration](deploy/README.md#clerk-configuration) for the existing instances and production DNS/certificate checks.
 
-This checkout's development keys and user IDs are saved in private `.env`. The private `.env.clerk.production` holds production Clerk keys, production user IDs and `PUBLIC_URL`; merge it into the server's protected runtime configuration when deploying. It does not contain database credentials and Next.js does not load that filename automatically. Neither file is committed or included in Docker builds. On a fresh checkout, obtain these values privately from the existing Clerk application. The app permits one or two exact `user_...` IDs and rejects missing, malformed or duplicate entries. Production users have different IDs from development users.
+Save development keys and user IDs in private `.env`. The private `.env.clerk.production` holds production Clerk keys, production user IDs and `PUBLIC_URL`; merge it into the server's protected runtime configuration when deploying. It does not contain database credentials and the app does not load that filename automatically. Neither file is committed or included in Docker builds. On a fresh checkout, obtain these values privately from the existing Clerk application. The app permits one or two exact `user_...` IDs and rejects missing, malformed or duplicate entries. Production users have different IDs from development users.
 
 The app has a cosy `/sign-in` page and an account menu with sign-out. An authenticated user outside the configured pair sees an access-denied page and cannot use the API. The server-rendered page and every tRPC procedure check access independently of middleware. Sign-up links are hidden in the app; accounts are managed through Clerk. The app's user-ID checks enforce private access without relying on Clerk's paid identifier allowlist feature.
 
-Missing keys show a setup message and deny film API access. There is no Basic Auth fallback or automatic creation of a Clerk application. Builds require neither Clerk keys nor database access; the Docker image receives configuration at startup. Only the publishable key is sent to the browser. **The app and film database are self-hosted; Clerk hosts identity and sessions.** Live login needs network access to Clerk.
+Missing keys show a setup message and deny film API access. There is no Basic Auth fallback or automatic creation of a Clerk application. Use `CLERK_PUBLISHABLE_KEY` for the public key. The old `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` name remains supported at runtime so existing deployments keep working; no key is baked into Vite client assets. Builds require neither Clerk keys nor database access; the Docker image receives configuration at startup. Only the publishable key is sent to the browser. **The app and film database are self-hosted; Clerk hosts identity and sessions.** Live login needs network access to Clerk.
 
 See [runtime configuration](deploy/README.md#runtime-configuration) and [Clerk configuration](deploy/README.md#clerk-configuration) before production release.
 
@@ -66,7 +66,7 @@ bun run db seed
 bun run dev
 ```
 
-Skip seed if the database already contains your list. Next.js serves the page and tRPC from <http://localhost:8080>; no separate backend process is needed. `bun run build` and `bun run start` run a production build locally. Database credentials remain server-only and are read at runtime, so building requires no PostgreSQL connection.
+Skip seed if the database already contains your list. TanStack Start serves the page and tRPC from <http://localhost:8080>; no separate backend process is needed. `bun run build` and `bun run start` run a production build locally. Database credentials remain server-only and are read at runtime, so building requires no PostgreSQL connection.
 
 ## Checks
 
@@ -74,6 +74,8 @@ Skip seed if the database already contains your list. Next.js serves the page an
 bun run typecheck
 bun run test
 bun run build
+bunx --no-install playwright install chromium
+bun run test:e2e
 ```
 
 Integration tests require a disposable PostgreSQL cluster with a privileged test login. They create uniquely named databases; the control database must end in `_test`. With the local development cluster:
@@ -83,13 +85,15 @@ docker compose -f compose.dev.yaml exec postgres createdb -U spooktober_owner sp
 TEST_DATABASE_URL='postgres://spooktober_owner:local-development-only@127.0.0.1:54329/spooktober_test?sslmode=disable' bun run test:integration
 ```
 
-Create the control database once. Tests cover migrations, restricted runtime permissions, typed tRPC transport, trusted-session access policy and origin protection, simultaneous changes across pools, and atomic JSON import/export with timestamp precision. The image build runs type checks and database-independent tests; run integration checks before releasing. These tests exercise the server access policy with trusted session fixtures; verify real Clerk login, logout and session expiry separately with configured keys.
+Create the control database once. Tests cover migrations, restricted runtime permissions, typed tRPC transport, trusted-session access policy and origin protection, simultaneous changes across pools, and atomic JSON import/export with timestamp precision. The Playwright suite covers setup pages at desktop/mobile sizes, metadata, unknown routes, readiness, fail-closed API responses without Clerk keys, and signed-out redirects/API denials through Clerk’s actual server middleware using nonfunctional fixture keys. Set `E2E_DATABASE_URL` to a disposable migrated PostgreSQL database to verify healthy readiness; otherwise it checks the unavailable response. Real Clerk login and authenticated browser editing require the existing application’s private test credentials and are not simulated.
+
+The image build runs type checks and database-independent tests; run integration checks before releasing. These tests exercise the server access policy with trusted session fixtures; verify real Clerk login, logout and session expiry separately with configured keys.
 
 ## Self-hosting
 
 Production runs on Herman (ARM macOS with Colima), using the shared PostgreSQL server, Caddy and Cloudflare Tunnel. The [Herman operating guide](deploy/README.md) contains runtime configuration, deployment, database maintenance and recovery instructions; shared infrastructure is maintained in `/Users/kyle/platform/runbook.md`.
 
-One Next.js container joins the platform's existing web/database networks and publishes no host port. The image uses Next.js standalone output, with a 256 MiB container limit and a four-connection database pool. Pushes to `main` are checked, published to GHCR and deployed to Herman by GitHub Actions; see [CI and releases](deploy/README.md#continuous-integration-and-releases).
+One TanStack Start container joins the platform's existing web/database networks and publishes no host port. The image uses Nitro’s standalone Node.js output, with a 256 MiB container limit and a four-connection database pool. Pushes to `main` are checked, published to GHCR and deployed to Herman by GitHub Actions; see [CI and releases](deploy/README.md#continuous-integration-and-releases).
 
 The PostgreSQL schema is unchanged by this framework migration. Existing PostgreSQL data can be used directly. For the old hosted watchlist, refresh the private JSON export before cutover and import it into an empty migrated database.
 

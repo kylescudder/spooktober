@@ -6,8 +6,8 @@ node_modules
 data
 artifacts
 deploy
-.next
+.output
+.tanstack
 out
-next-env.d.ts
 *.tsbuildinfo
 .DS_Store

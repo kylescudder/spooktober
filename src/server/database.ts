@@ -1,4 +1,4 @@
-import "server-only";
+import "@tanstack/react-start/server-only";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import pg, { type Pool, type PoolClient, type PoolConfig } from "pg";

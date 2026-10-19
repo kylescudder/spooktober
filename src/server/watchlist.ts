@@ -1,4 +1,4 @@
-import "server-only";
+import "@tanstack/react-start/server-only";
 import { createReadStream } from "node:fs";
 import { open, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
