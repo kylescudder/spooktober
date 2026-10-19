@@ -44,7 +44,7 @@ jobs:
           bun-version: 1.4.2
       - name: Check deployment security boundaries
         run: |
-          python3 -B -m unittest discover -s deploy -p test_deploy.py -v
+          python3 -B -m unittest discover -s deploy -p 'test_*.py' -v
           node --test deploy/receiver/server.test.mjs
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
@@ -73,5 +73,13 @@ jobs:
         with:
           context: .
           push: false
+          load: true
+          tags: spooktober:ci
           provenance: false
           sbom: false
+      # Runs the deployer's exact migration and permission commands inside that image
+      # against disposable PostgreSQL, so a packaging change cannot break production.
+      - name: Migrate and grant inside the runtime image
+        env:
+          SPOOKTOBER_TEST_IMAGE: spooktober:ci
+        run: python3 -B -m unittest discover -s deploy -p test_image.py -v

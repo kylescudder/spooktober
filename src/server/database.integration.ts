@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import type { Pool } from "pg";
-import { addFilm, createDatabase, importFilms, listFilms, markWatched, migrateDatabase, readyDatabase, reorderFilms } from "./database.ts";
+import { addFilm, createDatabase, grantRuntimeAccess, importFilms, listFilms, markWatched, migrateDatabase, readyDatabase, reorderFilms } from "./database.ts";
 import { parseWatchlist } from "./watchlist.ts";
 import { createTrpcHandler } from "./trpc-handler.ts";
 import type { AppRouter } from "./trpc.ts";
@@ -131,13 +131,24 @@ test("a restricted runtime role can save films but cannot create schema or alter
   const { pool, url, control, cleanup } = await testDatabase(t); await migrateDatabase(pool); await importFilms(pool, await seed());
   const role = `spooktober_role_${randomUUID().replaceAll("-", "")}`;
   await control.query(`CREATE ROLE "${role}" LOGIN PASSWORD 'local-runtime-only'`);
-  await pool.query(`REVOKE CREATE ON SCHEMA public FROM PUBLIC; GRANT USAGE ON SCHEMA public TO "${role}"; GRANT SELECT ON schema_migrations TO "${role}"; GRANT SELECT,INSERT,UPDATE ON films TO "${role}"`);
+  await pool.query("REVOKE CREATE ON SCHEMA public FROM PUBLIC");
+  await grantRuntimeAccess(pool, role); await grantRuntimeAccess(pool, role);
   url.username = role; url.password = "local-runtime-only";
   const runtime = createDatabase(url.href);
   cleanup.push(async () => { await runtime.end(); await pool.query(`DROP OWNED BY "${role}"`); await control.query(`DROP ROLE "${role}"`); });
   await readyDatabase(runtime);
   const id = randomUUID(); await addFilm(runtime, id, "Runtime film"); await markWatched(runtime, id, true); await reorderFilms(runtime, [id]);
   await assert.rejects(runtime.query("CREATE TABLE forbidden (id integer)"));
+  await assert.rejects(runtime.query("DELETE FROM films"));
   await assert.rejects(runtime.query("INSERT INTO schema_migrations (version) VALUES (2)"));
   await assert.rejects(migrateDatabase(runtime));
+});
+
+test("runtime grants reject unsafe role names and unmigrated databases", async (t) => {
+  const { pool } = await testDatabase(t);
+  await assert.rejects(grantRuntimeAccess(pool, "spooktober_runtime"));
+  await migrateDatabase(pool);
+  for (const role of ['x"; DROP TABLE films; --', "Mixed", "", "a".repeat(64)]) await assert.rejects(grantRuntimeAccess(pool, role), /role name/);
+  await assert.rejects(grantRuntimeAccess(pool, "spooktober_missing_role"));
+  await readyDatabase(pool);
 });

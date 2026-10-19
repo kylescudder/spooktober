@@ -113,15 +113,18 @@ jobs:
           DIGEST: ${{ steps.manifest.outputs.digest }}
         run: docker buildx imagetools create -t "$IMAGE:main" "$IMAGE@$DIGEST"
 
-  # Asks Herman to deploy the attested digest, then waits for the public site to
-  # report this commit. Herman verifies the attestation itself, so the webhook
-  # secret can only ever trigger a release that this workflow built from main.
+  # Asks Herman to deploy the attested digest, then requires Herman to report this
+  # exact digest and revision deployed (failing promptly if it reports a failure)
+  # and the public site to serve that revision. Herman verifies the attestation
+  # itself, so the webhook secret can only trigger a release built from main.
   deploy:
     needs: publish
     if: vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions: {}
+    timeout-minutes: 25
+    # Read-only token, used only to fetch deploy/await_release.py.
+    permissions:
+      contents: read
     environment:
       name: production
       url: https://spooktober.kylescudder.co.uk
@@ -132,6 +135,11 @@ jobs:
       DEPLOY_URL: https://deploy.kylescudder.co.uk/hooks/spooktober
       HEALTH_URL: https://spooktober.kylescudder.co.uk/healthz
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: deploy/await_release.py
+          sparse-checkout-cone-mode: false
       - name: Check deploy endpoint protection
         env:
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
@@ -143,6 +151,10 @@ jobs:
             --dump-header "$headers" -X POST "$DEPLOY_URL")
           [[ "$status" = 401 || "$status" = 403 ]] || { echo "::error::Cloudflare Access did not block an unauthenticated request ($status)."; exit 1; }
           ! grep -qi '^x-spooktober-deploy-hook: 1' "$headers" || { echo '::error::Unauthenticated request reached the receiver.'; exit 1; }
+          status=$(curl --silent --show-error --max-time 30 --output /dev/null --write-out '%{http_code}' \
+            --dump-header "$headers" "$DEPLOY_URL?status=1")
+          [[ "$status" = 401 || "$status" = 403 ]] || { echo "::error::Cloudflare Access did not block an unauthenticated status request ($status)."; exit 1; }
+          ! grep -qi '^x-spooktober-deploy-hook: 1' "$headers" || { echo '::error::Unauthenticated status request reached the receiver.'; exit 1; }
           for path in / /healthz /other; do
             status=$(curl --silent --show-error --max-time 30 --output /dev/null --write-out '%{http_code}' \
               -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
@@ -155,6 +167,14 @@ jobs:
             -H 'X-Spooktober-Signature: sha256=invalid' --data '{}' "$DEPLOY_URL")
           [[ "$status" = 401 ]] || { echo "::error::Invalid webhook signature returned $status."; exit 1; }
           grep -qi '^x-spooktober-deploy-hook: 1' "$headers" || { echo '::error::Service token did not reach the receiver.'; exit 1; }
+      - name: Check Herman can report release status
+        env:
+          DIGEST: ${{ needs.publish.outputs.digest }}
+          REVISION: ${{ github.sha }}
+          WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: python3 -B deploy/await_release.py preflight
       - name: Request deploy
         env:
           DIGEST: ${{ needs.publish.outputs.digest }}
@@ -162,7 +182,9 @@ jobs:
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: |
-          body=$(jq -cn --arg digest "$DIGEST" --arg revision "$GITHUB_SHA" --argjson timestamp "$(date +%s)" \
+          timestamp=$(date +%s)
+          echo "REQUEST_TIMESTAMP=$timestamp" >> "$GITHUB_ENV"
+          body=$(jq -cn --arg digest "$DIGEST" --arg revision "$GITHUB_SHA" --argjson timestamp "$timestamp" \
             '{digest: $digest, revision: $revision, timestamp: $timestamp}')
           signature=$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" -hex | awk '{print $NF}')
           curl --fail-with-body --silent --show-error --max-time 30 "$DEPLOY_URL" \
@@ -171,16 +193,16 @@ jobs:
             -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
             -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
             --data "$body"
-      - name: Wait for production to run this commit
-        run: |
-          for attempt in $(seq 60); do
-            revision=$(curl --fail --silent --max-time 10 --dump-header - --output /dev/null "$HEALTH_URL" \
-              | tr -d '\r' | awk -F': ' 'tolower($1) == "x-spooktober-revision" {print $2}' || true)
-            if [ "$revision" = "$GITHUB_SHA" ]; then
-              echo "Production is running $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "::error::Production did not report $GITHUB_SHA within 10 minutes (last: ${revision:-none}). Check state/deploy.log on Herman."
-          exit 1
+      # Fails as soon as Herman reports a terminal failure for this digest and
+      # revision; stalled hosts fail at HOST_TIMEOUT. Success needs both the host's
+      # report and the public site serving this revision.
+      - name: Wait for Herman and production
+        env:
+          DIGEST: ${{ needs.publish.outputs.digest }}
+          REVISION: ${{ github.sha }}
+          WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          HOST_TIMEOUT: "900"
+          READY_TIMEOUT: "180"
+        run: python3 -B deploy/await_release.py wait

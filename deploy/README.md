@@ -12,8 +12,8 @@ for the shared platform. This file owns the application's deployment commands.
 | Image repository | `ghcr.io/kylescudder/spooktober`, public |
 | App hostname | `spooktober.kylescudder.co.uk` |
 | App upstream | `spooktober:8080` on `platform-web` |
-| Database | `proj_spooktober`, private `postgres:5432` on internal `platform-db` |
-| Database roles | `proj_spooktober_owner` for migrations, `proj_spooktober_runtime` for the app |
+| Database | `spooktober`, private `postgres:5432` on internal `platform-db` |
+| Database roles | `spooktober_owner` for migrations and grants, `spooktober_runtime` for the app |
 | Hook hostname/path | `deploy.kylescudder.co.uk/hooks/spooktober` |
 | Hook upstream | `spooktober-deploy-hook:9000` on `platform-web` only |
 | Host trigger | launchd `com.herman.spooktober-deploy`, `QueueDirectories` |
@@ -38,6 +38,18 @@ checks the OCI revision against the signed request, exports the current list,
 applies migrations and runtime grants, then uses Compose's health wait. A failed
 health check restores the previous image. Migrations are not rolled back:
 new migrations must remain compatible with the previous release.
+
+Both database steps run the candidate image's bundled CLI (`node database.cjs
+migrate`, then `node database.cjs grant spooktober_runtime`) as the owner, so
+they never depend on loose `node_modules` in the image. `grant` verifies the
+runtime role's effective privileges and fails if they are wrong, for instance
+when run with the runtime login instead of the owner's.
+
+At each step the deployer writes a sanitized record of the release to
+`deploy-spool/status/<revision>-<digest>.json` (status, phase, rollback outcome
+and request time only; never logs or errors). The receiver serves it to GitHub
+and nothing else; full detail stays in `state/deploy.log` and
+`state/last-failure.json`.
 
 ## Private configuration
 
@@ -72,7 +84,7 @@ in `.env.migration`:
 
 | Setting | Value |
 | --- | --- |
-| `DATABASE_URL` | Restricted runtime login for `proj_spooktober` |
+| `DATABASE_URL` | Restricted `spooktober_runtime` login for the `spooktober` database |
 | `CLERK_PUBLISHABLE_KEY` | Production instance's public `pk_live_...` key |
 | `CLERK_SECRET_KEY` | Same instance's private `sk_live_...` key |
 | `CLERK_ALLOWED_USER_IDS` | Kyle and Rhiann's exact production user IDs, comma separated |
@@ -169,16 +181,32 @@ update the GitHub secret through private stdin, then recreate the receiver.
 
 ## Continuous integration and releases
 
-Pull requests run [CI](../.github/workflows/ci.yml): deployment security checks,
-type checks, unit tests, the production build, integration tests against disposable
-PostgreSQL 18, and an unpublished production image build. CI has read-only repository
+Pull requests run [CI](../.github/workflows/ci.yml): deployment security checks
+(deployer, receiver and release-wait tests), type checks, unit tests, the production
+build, integration tests against disposable PostgreSQL 18, and an unpublished
+production image build. [`test_image.py`](test_image.py) then runs the deployer's exact
+migrate and grant commands inside that image against a disposable PostgreSQL
+container and checks what the runtime role can and cannot do. To run it locally:
+`docker build -t spooktober:ci . && SPOOKTOBER_TEST_IMAGE=spooktober:ci python3 -B -m unittest discover -s deploy -p test_image.py -v`. CI has read-only repository
 access and no secrets.
 
 Every push to `main` runs [Release](../.github/workflows/release.yml), repeats CI,
 builds native `linux/amd64` and `linux/arm64` images and publishes the multi-platform
 image tagged `sha-<commit>`. It signs a provenance attestation before moving `main`
-to that digest. With `DEPLOY_ENABLED=true`, the deploy job sends Herman the signed
-webhook and waits for `/healthz` to report the commit in `X-Spooktober-Revision`.
+to that digest. With `DEPLOY_ENABLED=true`, the deploy job first confirms Herman
+can report release status (so an un-updated host fails before anything is queued),
+sends the signed webhook, then runs [`await_release.py`](await_release.py):
+
+1. It polls Herman's signed status endpoint for that exact digest **and** revision,
+   and for that request, so another release or an earlier attempt of the same one
+   is never mistaken for this one.
+2. A reported failure (`failed`, or `superseded` by a newer request) fails the job
+   at once, naming the phase and rollback outcome. A host that stalls or an
+   unreachable receiver fails at `HOST_TIMEOUT` (15 minutes), with 10-second
+   request timeouts.
+3. Only after the host reports success must the public `/healthz` report the commit
+   in `X-Spooktober-Revision` (`READY_TIMEOUT`, 3 minutes).
+
 Protect `main` with required pull requests and a passing `CI / check`.
 
 The host deployer verifies the digest before running it. For independent verification:
@@ -217,7 +245,13 @@ reaching the receiver. The release job checks this, tests authenticated 404s
 for other paths, and verifies that an incorrect HMAC signature returns 401
 from the receiver. Its response marker distinguishes an origin 401 from an
 Access denial. The valid signed request must return 202, then the job waits
-for the app's public `/healthz` revision to match the merging commit.
+for Herman's status and the app's public `/healthz` revision as described above.
+
+The status endpoint is `GET /hooks/spooktober?digest=…&revision=…&timestamp=…` on the
+same hostname and path as the webhook, so no routing change is needed. It sits
+behind the same Access service token and also requires an HMAC over
+`status\n<digest>\n<revision>\n<timestamp>` (a webhook signature cannot be replayed
+against it) and a timestamp within five minutes. It returns only fixed-vocabulary fields.
 
 Clerk's production domain CNAMEs are DNS-only and separate from the tunnel.
 The runtime allows only Kyle and Rhiann's existing production user IDs.
@@ -241,15 +275,15 @@ docker run --rm --read-only --network platform-db --env-file .env.migration \
   ghcr.io/kylescudder/spooktober@sha256:<digest> node database.cjs migrate
 ```
 
-Apply runtime grants as the owner inside `proj_spooktober`:
+Apply runtime grants with the same owner login and image (idempotent):
 
-```sql
-GRANT USAGE ON SCHEMA public TO proj_spooktober_runtime;
-GRANT SELECT ON public.schema_migrations TO proj_spooktober_runtime;
-REVOKE INSERT, UPDATE, DELETE ON public.schema_migrations FROM proj_spooktober_runtime;
-GRANT SELECT, INSERT, UPDATE ON public.films TO proj_spooktober_runtime;
-REVOKE DELETE ON public.films FROM proj_spooktober_runtime;
+```sh
+docker run --rm --read-only --network platform-db --env-file .env.migration \
+  ghcr.io/kylescudder/spooktober@sha256:<digest> node database.cjs grant spooktober_runtime
 ```
+
+This gives `spooktober_runtime` read/insert/update on `films`, read-only access
+to `schema_migrations`, and no delete or schema changes.
 
 For an empty migrated database, keep the app stopped and choose either a seed
 for a fresh list or an import from a private snapshot:
@@ -294,3 +328,110 @@ mark automatic deployment complete until a main merge's Release deploy job is
 green and public health reports that same 40-character revision. Real
 Kyle/Rhiann login, logout and simultaneous edits require their actual sessions;
 trusted-session integration tests alone do not establish that manual acceptance.
+
+## Host rollout
+
+Routine image releases do **not** update the host's checkout, deployer, receiver or
+LaunchAgent, and Herman's checkout can be older than `main`. Tooling changes such as
+status reporting must be installed by hand. Everything below works over SSH with
+Kyle's existing access; nothing needs the desktop, a screen share or an unlocked
+screen. Never print `.env*`, `secrets/` or the webhook secret.
+
+Read `/Users/kyle/platform/runbook.md` and the `herman-deploy` / `herman-ops` skills
+first, and follow them where they differ. Treat this section as app-specific detail.
+
+**Order.** Merge the PR first. The new Release run builds the image, then its deploy
+job stops at *Check Herman can report release status* with nothing queued, so
+production stays on its current revision. Roll out below, then re-run that deploy job.
+(Rolling out first is also safe: the host tooling is compatible with the old workflow.)
+Do not re-deploy the old `3f8c1ee` digest or re-run its Release: that image lacks
+`grant` and its dependency layout cannot apply grants.
+
+```sh
+cd /Users/kyle/platform/apps/spooktober
+```
+
+1. **Record the current state.**
+   ```sh
+   git status --short; git rev-parse HEAD
+   curl -sI https://spooktober.kylescudder.co.uk/healthz | grep -i x-spooktober-revision
+   cat state/deployment.json; cat state/last-failure.json; tail -n 40 state/deploy.log
+   launchctl print gui/501/com.herman.spooktober-deploy | head -20
+   ```
+   Production should report `c2e9ba46650a43c3ba1d5026771adccde38b8e52` (the failed
+   release changed nothing).
+
+2. **Reconcile host-specific changes before replacing anything.**
+   ```sh
+   backup=state/rollout-$(date -u +%Y%m%dT%H%M%SZ); mkdir -p -m 700 "$backup"
+   cp -Rp deploy compose.yaml "$backup"/
+   cp -p ~/Library/LaunchAgents/com.herman.spooktober-deploy.plist "$backup"/
+   git fetch origin
+   git diff HEAD -- deploy compose.yaml             # host-local edits not in Git
+   git diff HEAD origin/main -- deploy compose.yaml # what the rollout changes
+   ```
+   Host-local differences are expected (Herman already uses `spooktober_runtime`;
+   check for Colima paths, `PATH`, Docker config or network names too). Everything
+   host-specific must survive: if a host edit is not already in `origin/main`, port it
+   into the update rather than overwriting it. The repository now carries
+   `RUNTIME_ROLE = 'spooktober_runtime'` and database `spooktober`; it must not
+   regress to `proj_spooktober_*` anywhere.
+
+3. **Update the checkout.** If the tree is clean, `git pull --ff-only origin main`.
+   If it has host edits, commit them on a local branch first, then merge
+   `origin/main` and resolve conflicts as in step 2. Confirm
+   `git diff origin/main -- deploy compose.yaml` shows only intentional host edits.
+
+4. **Test the installed tooling** (no production effect). Herman may lack Node; run
+   the receiver tests in a container:
+   ```sh
+   python3 -B -m unittest discover -s deploy -p test_deploy.py -v
+   docker run --rm -v "$PWD/deploy:/deploy:ro" node:22-alpine node --test /deploy/receiver/server.test.mjs
+   ```
+
+5. **Install.** Stop the agent so a request cannot arrive mid-swap (queued requests
+   wait; they are not lost), create the status directory, recreate the receiver, and
+   reinstall the agent:
+   ```sh
+   launchctl bootout gui/501/com.herman.spooktober-deploy
+   mkdir -p -m 700 deploy-spool/status
+   docker compose -f deploy/compose.deploy-hook.yaml --env-file .env.deploy-hook up -d --force-recreate --wait
+   python3 -B deploy/install-launchd.py
+   launchctl print gui/501/com.herman.spooktober-deploy | head -20
+   plutil -p ~/Library/LaunchAgents/com.herman.spooktober-deploy.plist   # compare with "$backup"
+   ```
+   `.env.deploy-hook` must resolve `DEPLOY_SPOOL_DIR` (if it sets one) to the directory
+   holding `requests` and `status`. If `launchctl bootstrap` reports the GUI domain is
+   unavailable, stop and report it: Colima also needs that session.
+
+6. **Verify the receiver reports status** without exposing the secret. This signs a
+   request for an arbitrary release inside the container and prints only the reply,
+   expected `"status":"pending"`:
+   ```sh
+   docker compose -f deploy/compose.deploy-hook.yaml --env-file .env.deploy-hook exec -T deploy-hook node -e '
+   const c=require("crypto"),fs=require("fs"),s=fs.readFileSync("/run/secrets/deploy_webhook_secret","utf8").trim();
+   const d="sha256:"+"0".repeat(64),r="0".repeat(40),t=Math.floor(Date.now()/1000);
+   const g=c.createHmac("sha256",s).update(`status\n${d}\n${r}\n${t}`).digest("hex");
+   fetch(`http://127.0.0.1:9000/hooks/spooktober?digest=${d}&revision=${r}&timestamp=${t}`,{headers:{"X-Spooktober-Signature":"sha256="+g}}).then(x=>x.text()).then(console.log)'
+   docker inspect --format '{{range .Mounts}}{{.Destination}} rw={{.RW}}{{"\n"}}{{end}}' $(docker compose -f deploy/compose.deploy-hook.yaml --env-file .env.deploy-hook ps -q deploy-hook)
+   ```
+   The `/spool/status` mount must show `rw=false`.
+
+7. **Release and watch.** Re-run the failed *deploy* job of the new commit's Release
+   (or merge a change if it has not run). It should pass *Check Herman can report
+   release status*, then log `Herman: running, phase …` through to
+   `Herman reports success` and `Production is running <commit>`. On Herman:
+   ```sh
+   tail -n 60 state/deploy.log
+   cat state/deployment.json state/history.log
+   cat deploy-spool/status/*-<digest-hex>.json          # succeeded / complete
+   curl -sI https://spooktober.kylescudder.co.uk/healthz | grep -i x-spooktober-revision
+   ```
+   Also confirm a pre-deploy backup was written under `backups/` and that the app
+   still loads for Kyle and Rhiann.
+
+**If it fails.** The app stays on, or is restored to, the previous image. Read
+`state/last-failure.json` and `state/deploy.log` on Herman; GitHub shows only the
+phase. To back the tooling out, copy `"$backup"/deploy` back over `deploy/`, reinstall
+as in step 5, and set `DEPLOY_ENABLED=false` until fixed (the pre-fix script cannot
+apply grants for this image layout).

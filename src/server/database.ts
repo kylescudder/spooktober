@@ -80,6 +80,31 @@ export async function readyDatabase(pool: Pool) {
   if (history.version !== files.length || history.applied !== history.version) throw new Error("PostgreSQL schema does not match this app; run db migrate before starting.");
 }
 
+const roleName = /^[a-z_][a-z0-9_]{0,62}$/;
+
+// The app's login may only read and write the watchlist; it can neither alter
+// migration history nor delete films. Run as the owner after every migration.
+export async function grantRuntimeAccess(pool: Pool, role: string) {
+  if (!roleName.test(role)) throw new Error("The runtime role must be a lower-case PostgreSQL role name.");
+  await readyDatabase(pool);
+  const login = `"${role}"`;
+  await transaction(pool, async (client) => {
+    await client.query(`GRANT USAGE ON SCHEMA public TO ${login};
+      GRANT SELECT ON public.schema_migrations TO ${login};
+      REVOKE INSERT, UPDATE, DELETE ON public.schema_migrations FROM ${login};
+      GRANT SELECT, INSERT, UPDATE ON public.films TO ${login};
+      REVOKE DELETE ON public.films FROM ${login}`);
+    // GRANT only warns when the login lacks grant rights, so verify what the role can really do.
+    const { rows: [effective] } = await client.query(`SELECT
+      has_schema_privilege($1, 'public', 'USAGE') AND has_table_privilege($1, 'public.schema_migrations', 'SELECT')
+      AND has_table_privilege($1, 'public.films', 'SELECT') AND has_table_privilege($1, 'public.films', 'INSERT')
+      AND has_table_privilege($1, 'public.films', 'UPDATE') AND NOT has_table_privilege($1, 'public.films', 'DELETE')
+      AND NOT has_table_privilege($1, 'public.schema_migrations', 'INSERT') AND NOT has_table_privilege($1, 'public.schema_migrations', 'UPDATE')
+      AND NOT has_table_privilege($1, 'public.schema_migrations', 'DELETE') AS ok`, [role]);
+    if (!effective.ok) throw new Error("The runtime role does not have the intended privileges; run this as the schema owner.");
+  });
+}
+
 export async function listFilms(db: Queryable): Promise<Film[]> {
   const { rows } = await db.query<Film>(`SELECT id,title,position,watched,watched_at AS "watchedAt",
     updated_at AS "updatedAt",created_at AS "createdAt" FROM films ORDER BY position,id`);
