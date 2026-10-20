@@ -1,6 +1,6 @@
 """Production migration and permission commands, run inside the real runtime image.
 
-Uses the exact argument lists herman-deploy.py builds for production (same flags,
+Uses the exact argument lists host-deploy.py builds for production (same flags,
 read-only root, no capabilities, private database network, owner env file) against
 a disposable PostgreSQL container. Set SPOOKTOBER_TEST_IMAGE to a built image, e.g.
 
@@ -15,21 +15,25 @@ import os
 from pathlib import Path
 import secrets
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location('deployer', HERE / 'herman-deploy.py')
-deployer = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(deployer)
+sys.path.insert(0, str(HERE))
+spec = importlib.util.spec_from_file_location('host_deploy', HERE / 'host-deploy.py')
+app = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(app)
+core = app.core
+core.configure(app.APP)
 
 IMAGE = os.environ.get('SPOOKTOBER_TEST_IMAGE')
 POSTGRES = 'postgres:18.6-alpine'
 DATABASE = 'spooktober'
 OWNER = 'spooktober_owner'
-RUNTIME = deployer.RUNTIME_ROLE
+RUNTIME = app.RUNTIME_ROLE
 
 
 def docker(*args, check=True, **kwargs):
@@ -62,7 +66,7 @@ class RuntimeImage(unittest.TestCase):
         env = cls.app / '.env.migration'
         env.write_text(f'DATABASE_URL=postgres://{OWNER}:{cls.owner_password}@postgres:5432/{DATABASE}?sslmode=disable\n')
         env.chmod(0o600)
-        cls.patch = patch.object(deployer, 'APP', cls.app)
+        cls.patch = patch.object(core, 'APP', cls.app)
         cls.patch.start()
 
     @classmethod
@@ -78,7 +82,7 @@ class RuntimeImage(unittest.TestCase):
                       '-v', 'ON_ERROR_STOP=1', '-tA', '-c', statement, check=False)
 
     def commands(self):
-        return deployer.migration_commands(IMAGE, self.network)
+        return app.migration_commands(IMAGE, self.network)
 
     def runtime_sql(self, statement):
         return self.sql(statement, RUNTIME, self.runtime_password)
@@ -86,11 +90,11 @@ class RuntimeImage(unittest.TestCase):
     def test_production_commands_migrate_and_grant_only_what_the_app_needs(self):
         migrate, grant = self.commands()
         # The deployer's own runner: it raises on a non-zero exit, as it does in production.
-        deployer.run(migrate)
-        deployer.run(grant)
+        core.run(migrate)
+        core.run(grant)
         # Repeatable, as every release runs both again.
-        deployer.run(migrate)
-        deployer.run(grant)
+        core.run(migrate)
+        core.run(grant)
 
         for statement in ("SELECT count(*) FROM public.films", "SELECT max(version) FROM public.schema_migrations",
                           "INSERT INTO films (id,title,position,created_at,updated_at) VALUES ('t1','Halloween',0,'now','now')",
@@ -105,15 +109,15 @@ class RuntimeImage(unittest.TestCase):
             self.assertIn('permission denied', result.stderr)
 
     def test_the_runtime_role_can_run_the_app_image_against_the_granted_database(self):
-        deployer.run(self.commands()[0])
-        deployer.run(self.commands()[1])
+        core.run(self.commands()[0])
+        core.run(self.commands()[1])
         url = f'postgres://{RUNTIME}:{self.runtime_password}@postgres:5432/{DATABASE}?sslmode=disable'
         result = docker('run', '--rm', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
                         '--network', self.network, '-e', f'DATABASE_URL={url}', IMAGE, 'node', 'database.cjs', 'export', '-')
         self.assertIsInstance(json.loads(result.stdout)['films'], list)
 
     def test_a_grant_that_the_login_cannot_make_is_not_reported_as_success(self):
-        deployer.run(self.commands()[0])
+        core.run(self.commands()[0])
         self.sql('CREATE ROLE spooktober_other', OWNER, self.owner_password)
         url = f'postgres://{RUNTIME}:{self.runtime_password}@postgres:5432/{DATABASE}?sslmode=disable'
         # PostgreSQL only warns when a non-owner grants; the command must still fail.
@@ -129,7 +133,7 @@ class RuntimeImage(unittest.TestCase):
         self.assertNotIn('MODULE_NOT_FOUND', result.stdout + result.stderr)
 
     def test_failures_stay_generic_and_do_not_leak_credentials(self):
-        deployer.run(self.commands()[0])
+        core.run(self.commands()[0])
         grant = self.commands()[1]
         grant[-1] = 'spooktober_missing_role'
         result = docker(*grant[1:], check=False)
@@ -138,8 +142,8 @@ class RuntimeImage(unittest.TestCase):
         self.assertIn('Database command failed', combined)
         for private in (self.owner_password, self.runtime_password, 'postgres://'):
             self.assertNotIn(private, combined)
-        with self.assertRaises(deployer.Error) as raised:
-            deployer.run(grant)
+        with self.assertRaises(core.Error) as raised:
+            core.run(grant)
         self.assertNotIn(self.owner_password, str(raised.exception))
         unsafe = self.commands()[1]
         unsafe[-1] = 'x"; DROP TABLE films; --'

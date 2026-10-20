@@ -91,9 +91,9 @@ The image build runs type checks and database-independent tests; run integration
 
 ## Self-hosting
 
-Production runs on Herman (ARM macOS with Colima), using the shared PostgreSQL server, Caddy and Cloudflare Tunnel. The [Herman operating guide](deploy/README.md) contains runtime configuration, deployment, database maintenance and recovery instructions; shared infrastructure is maintained in `/Users/kyle/platform/runbook.md`.
+Production runs on the host (ARM macOS with Colima), using the shared PostgreSQL server, Caddy and Cloudflare Tunnel. The [host operating guide](deploy/README.md) contains runtime configuration, deployment, database maintenance and recovery instructions; shared infrastructure is maintained in `/Users/kyle/platform/runbook.md`.
 
-One TanStack Start container joins the platform's existing web/database networks and publishes no host port. The image uses Nitro’s standalone Node.js output, with a 256 MiB container limit and a four-connection database pool. Pushes to `main` are checked, published to GHCR and deployed to Herman by GitHub Actions; see [CI and releases](deploy/README.md#continuous-integration-and-releases).
+One TanStack Start container joins the platform's existing web/database networks and publishes no host port. The image uses Nitro’s standalone Node.js output, with a 256 MiB container limit and a four-connection database pool. Pushes to `main` are checked, published to GHCR and deployed to the host by GitHub Actions; see [CI and releases](deploy/README.md#continuous-integration-and-releases).
 
 The PostgreSQL schema is unchanged by this framework migration. Existing PostgreSQL data can be used directly. For the old hosted watchlist, refresh the private JSON export before cutover and import it into an empty migrated database.
 

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Wait for Herman to report one release, then for the public site to run it.
+"""Wait for the host to report one release, then for the public site to run it.
 
 Run by the release workflow after it queues a deployment:
 
-    await_release.py preflight   # before queueing: can Herman report status at all?
+    await_release.py preflight   # before queueing: can the host report status at all?
     await_release.py wait        # after queueing: host success, then public readiness
 
-Herman's receiver answers a signed GET with sanitized metadata only (status, phase,
+The host's receiver answers a signed GET with sanitized metadata only (status, phase,
 rollback outcome). A terminal host failure fails the workflow immediately; a stalled
 host or unreachable receiver fails at a bounded deadline. Status for any other
 release, or for an earlier request of the same release, is treated as not yet reported.
@@ -95,10 +95,10 @@ def preflight(settings):
     known = ('pending', 'running', 'succeeded', 'failed', 'superseded')
     if (document is None or document.get('status') not in known or document.get('digest') != settings['digest']
             or document.get('revision') != settings['revision']):
-        annotate('error', f'Herman cannot report release status ({problem or "unexpected response"}). '
+        annotate('error', f'The host cannot report release status ({problem or "unexpected response"}). '
                  'Install the updated receiver and deploy tooling before releasing; see deploy/README.md. Nothing was deployed.')
         return 1
-    print('Herman reports release status.')
+    print('The host reports release status.')
     return 0
 
 
@@ -110,22 +110,22 @@ def wait_for_host(settings):
         if document is not None and belongs_to_request(document, settings):
             problem = None
             if document['status'] == 'succeeded':
-                print(f'Herman reports success ({describe(document)}).')
+                print(f'The host reports success ({describe(document)}).')
                 return True
             if document['status'] in TERMINAL_FAILURES:
-                annotate('error', f'Herman did not deploy {settings["revision"]}: {describe(document)}. '
-                         'Production is unchanged or was rolled back. See state/deploy.log and state/last-failure.json on Herman.')
-                summary(f'Herman reported `{document["status"]}` at phase `{document.get("phase")}`.')
+                annotate('error', f'The host did not deploy {settings["revision"]}: {describe(document)}. '
+                         'Production is unchanged or was rolled back. See state/deploy.log and state/last-failure.json on the host.')
+                summary(f'The host reported `{document["status"]}` at phase `{document.get("phase")}`.')
                 return False
             current = describe(document)
             if current != last:
-                print(f'Herman: {current}', flush=True)
+                print(f'Host: {current}', flush=True)
                 last = current
         else:
             problem = error or 'status belongs to another release or an earlier request'
         if time.monotonic() >= deadline:
-            annotate('error', f'Herman did not report success for {settings["revision"]} within {int(settings["host_timeout"])} seconds '
-                     f'(last: {last or problem}). Check state/deploy.log on Herman.')
+            annotate('error', f'The host did not report success for {settings["revision"]} within {int(settings["host_timeout"])} seconds '
+                     f'(last: {last or problem}). Check state/deploy.log on the host.')
             return False
         time.sleep(settings['poll'])
 
@@ -141,7 +141,7 @@ def wait_for_public(settings):
             summary(f'Production is running `{revision}`.')
             return True
         if time.monotonic() >= deadline:
-            annotate('error', f'Herman reported success but the public site did not report {settings["revision"]} '
+            annotate('error', f'The host reported success but the public site did not report {settings["revision"]} '
                      f'within {int(settings["ready_timeout"])} seconds (last: {revision or "none"}).')
             return False
         time.sleep(settings['poll'])

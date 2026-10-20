@@ -1,8 +1,15 @@
-# Spooktober on Herman
+# Spooktober on the host
 
-Herman is ARM macOS with Colima, not a Linux/systemd host. Read
-`/Users/kyle/platform/runbook.md` and use the `herman-deploy` / `herman-ops` skills
+The host is ARM macOS with Colima, not a Linux/systemd host. Read
+`/Users/kyle/platform/runbook.md` and use the host deployment and operations runbooks
 for the shared platform. This file owns the application's deployment commands.
+
+## Deployer
+
+`deploy/host-deploy.py` holds this app's settings and hooks; the
+shared flow is `deploy/deploy_core.py`, vendored unchanged from
+`kylescudder/deploy-core` (see `deploy/deploy_core.lock`). Change the core
+there and sync it; CI fails if the vendored copy is edited here.
 
 ## Actual configuration
 
@@ -16,7 +23,7 @@ for the shared platform. This file owns the application's deployment commands.
 | Database roles | `spooktober_owner` for migrations and grants, `spooktober_runtime` for the app |
 | Hook hostname/path | `deploy.kylescudder.co.uk/hooks/spooktober` |
 | Hook upstream | `spooktober-deploy-hook:9000` on `platform-web` only |
-| Host trigger | launchd `com.herman.spooktober-deploy`, `QueueDirectories` |
+| Host trigger | launchd `com.kylescudder.spooktober-deploy`, `QueueDirectories` |
 | Deploy identity | Kyle, UID/GID `501:20`, owner of the Colima session |
 | GitHub environment | `production`, restricted to branch `main`, no required reviewers |
 
@@ -73,7 +80,7 @@ authenticated Kyle account; do not copy that login into the receiver or GitHub.
 
 The first hosted import contains 20 films, three watched, with every ID, title,
 order, flag and timestamp checked. The old hosted site stays available during
-acceptance. Its database does not synchronize with Herman: use the new address
+acceptance. Its database does not synchronize with the host: use the new address
 for edits after cutover.
 
 ## Runtime configuration
@@ -145,12 +152,12 @@ From the checkout, with private configuration already installed:
 
 ```sh
 docker compose -f deploy/compose.deploy-hook.yaml --env-file .env.deploy-hook up -d --force-recreate --wait
-python3 -B deploy/install-launchd.py
-launchctl print gui/501/com.herman.spooktober-deploy
+python3 -B deploy/host-deploy.py --install <host LocalHostName>
+launchctl print gui/501/com.kylescudder.spooktober-deploy
 tail -n 100 state/deploy.log
 docker compose -f deploy/compose.deploy-hook.yaml --env-file .env.deploy-hook logs --tail 50
 cat state/history.log
-./deploy/herman-deploy.sh sha256:<verified-main-digest>
+./deploy/host-deploy.sh sha256:<verified-main-digest>
 ```
 
 The final command deploys or rolls back to an attested main image. Successful
@@ -167,7 +174,7 @@ gh variable set DEPLOY_ENABLED --body false --repo kylescudder/spooktober
 To stop the host trigger as well:
 
 ```sh
-launchctl bootout gui/501/com.herman.spooktober-deploy
+launchctl bootout gui/501/com.kylescudder.spooktober-deploy
 ```
 
 Resume the agent with the installer; existing queued requests then run. Set
@@ -176,7 +183,7 @@ Resume the agent with the installer; existing queued requests then run. Set
 The app does not update its source checkout automatically. After reviewing and
 pulling changes to `compose.yaml` or `deploy/`, recreate the receiver and rerun
 the launchd installer if it changed. App releases themselves use published
-images; they do not build source on Herman. Rotate the HMAC secret locally,
+images; they do not build source on the host. Rotate the HMAC secret locally,
 update the GitHub secret through private stdin, then recreate the receiver.
 
 ## Continuous integration and releases
@@ -193,11 +200,11 @@ access and no secrets.
 Every push to `main` runs [Release](../.github/workflows/release.yml), repeats CI,
 builds native `linux/amd64` and `linux/arm64` images and publishes the multi-platform
 image tagged `sha-<commit>`. It signs a provenance attestation before moving `main`
-to that digest. With `DEPLOY_ENABLED=true`, the deploy job first confirms Herman
+to that digest. With `DEPLOY_ENABLED=true`, the deploy job first confirms the host
 can report release status (so an un-updated host fails before anything is queued),
 sends the signed webhook, then runs [`await_release.py`](await_release.py):
 
-1. It polls Herman's signed status endpoint for that exact digest **and** revision,
+1. It polls the host's signed status endpoint for that exact digest **and** revision,
    and for that request, so another release or an earlier attempt of the same one
    is never mistaken for this one.
 2. A reported failure (`failed`, or `superseded` by a newer request) fails the job
@@ -245,7 +252,7 @@ reaching the receiver. The release job checks this, tests authenticated 404s
 for other paths, and verifies that an incorrect HMAC signature returns 401
 from the receiver. Its response marker distinguishes an origin 401 from an
 Access denial. The valid signed request must return 202, then the job waits
-for Herman's status and the app's public `/healthz` revision as described above.
+for the host's status and the app's public `/healthz` revision as described above.
 
 The status endpoint is `GET /hooks/spooktober?digest=…&revision=…&timestamp=…` on the
 same hostname and path as the webhook, so no routing change is needed. It sits
@@ -316,7 +323,7 @@ Shared encrypted NAS backups run Sunday 03:00 Europe/London and keep one latest
 successful archive at `/Volumes/kyle/Backups/herman-platform-latest.tar.gz.age`.
 They contain the project PostgreSQL dump, role credentials, deployment settings,
 private app secrets, deploy tooling and successful image/history records.
-Use `herman-ops` and `/Users/kyle/platform/backups/operations.md` for recovery.
+Use the host operations runbook and `/Users/kyle/platform/backups/operations.md` for recovery.
 
 Back up before schema changes and test restores in a separate database, including
 migration history. Keep the previous image and roll back only to a compatible
@@ -332,16 +339,16 @@ trusted-session integration tests alone do not establish that manual acceptance.
 ## Host rollout
 
 Routine image releases do **not** update the host's checkout, deployer, receiver or
-LaunchAgent, and Herman's checkout can be older than `main`. Tooling changes such as
+LaunchAgent, and the host's checkout can be older than `main`. Tooling changes such as
 status reporting must be installed by hand. Everything below works over SSH with
 Kyle's existing access; nothing needs the desktop, a screen share or an unlocked
 screen. Never print `.env*`, `secrets/` or the webhook secret.
 
-Read `/Users/kyle/platform/runbook.md` and the `herman-deploy` / `herman-ops` skills
+Read `/Users/kyle/platform/runbook.md` and the host deployment and operations runbooks
 first, and follow them where they differ. Treat this section as app-specific detail.
 
 **Order.** Merge the PR first. The new Release run builds the image, then its deploy
-job stops at *Check Herman can report release status* with nothing queued, so
+job stops at *Check the host can report release status* with nothing queued, so
 production stays on its current revision. Roll out below, then re-run that deploy job.
 (Rolling out first is also safe: the host tooling is compatible with the old workflow.)
 Do not re-deploy the old `3f8c1ee` digest or re-run its Release: that image lacks
@@ -356,7 +363,7 @@ cd /Users/kyle/platform/apps/spooktober
    git status --short; git rev-parse HEAD
    curl -sI https://spooktober.kylescudder.co.uk/healthz | grep -i x-spooktober-revision
    cat state/deployment.json; cat state/last-failure.json; tail -n 40 state/deploy.log
-   launchctl print gui/501/com.herman.spooktober-deploy | head -20
+   launchctl print gui/501/com.kylescudder.spooktober-deploy | head -20
    ```
    Production should report `c2e9ba46650a43c3ba1d5026771adccde38b8e52` (the failed
    release changed nothing).
@@ -365,12 +372,12 @@ cd /Users/kyle/platform/apps/spooktober
    ```sh
    backup=state/rollout-$(date -u +%Y%m%dT%H%M%SZ); mkdir -p -m 700 "$backup"
    cp -Rp deploy compose.yaml "$backup"/
-   cp -p ~/Library/LaunchAgents/com.herman.spooktober-deploy.plist "$backup"/
+   cp -p ~/Library/LaunchAgents/com.kylescudder.spooktober-deploy.plist "$backup"/
    git fetch origin
    git diff HEAD -- deploy compose.yaml             # host-local edits not in Git
    git diff HEAD origin/main -- deploy compose.yaml # what the rollout changes
    ```
-   Host-local differences are expected (Herman already uses `spooktober_runtime`;
+   Host-local differences are expected (the host already uses `spooktober_runtime`;
    check for Colima paths, `PATH`, Docker config or network names too). Everything
    host-specific must survive: if a host edit is not already in `origin/main`, port it
    into the update rather than overwriting it. The repository now carries
@@ -382,7 +389,7 @@ cd /Users/kyle/platform/apps/spooktober
    `origin/main` and resolve conflicts as in step 2. Confirm
    `git diff origin/main -- deploy compose.yaml` shows only intentional host edits.
 
-4. **Test the installed tooling** (no production effect). Herman may lack Node; run
+4. **Test the installed tooling** (no production effect). The host may lack Node; run
    the receiver tests in a container:
    ```sh
    python3 -B -m unittest discover -s deploy -p test_deploy.py -v
@@ -393,12 +400,12 @@ cd /Users/kyle/platform/apps/spooktober
    wait; they are not lost), create the status directory, recreate the receiver, and
    reinstall the agent:
    ```sh
-   launchctl bootout gui/501/com.herman.spooktober-deploy
+   launchctl bootout gui/501/com.kylescudder.spooktober-deploy
    mkdir -p -m 700 deploy-spool/status
    docker compose -f deploy/compose.deploy-hook.yaml --env-file .env.deploy-hook up -d --force-recreate --wait
-   python3 -B deploy/install-launchd.py
-   launchctl print gui/501/com.herman.spooktober-deploy | head -20
-   plutil -p ~/Library/LaunchAgents/com.herman.spooktober-deploy.plist   # compare with "$backup"
+   python3 -B deploy/host-deploy.py --install <host LocalHostName>
+   launchctl print gui/501/com.kylescudder.spooktober-deploy | head -20
+   plutil -p ~/Library/LaunchAgents/com.kylescudder.spooktober-deploy.plist   # compare with "$backup"
    ```
    `.env.deploy-hook` must resolve `DEPLOY_SPOOL_DIR` (if it sets one) to the directory
    holding `requests` and `status`. If `launchctl bootstrap` reports the GUI domain is
@@ -418,9 +425,9 @@ cd /Users/kyle/platform/apps/spooktober
    The `/spool/status` mount must show `rw=false`.
 
 7. **Release and watch.** Re-run the failed *deploy* job of the new commit's Release
-   (or merge a change if it has not run). It should pass *Check Herman can report
-   release status*, then log `Herman: running, phase …` through to
-   `Herman reports success` and `Production is running <commit>`. On Herman:
+   (or merge a change if it has not run). It should pass *Check the host can report
+   release status*, then log `Host: running, phase …` through to
+   `The host reports success` and `Production is running <commit>`. On the host:
    ```sh
    tail -n 60 state/deploy.log
    cat state/deployment.json state/history.log
@@ -431,7 +438,7 @@ cd /Users/kyle/platform/apps/spooktober
    still loads for Kyle and Rhiann.
 
 **If it fails.** The app stays on, or is restored to, the previous image. Read
-`state/last-failure.json` and `state/deploy.log` on Herman; GitHub shows only the
+`state/last-failure.json` and `state/deploy.log` on the host; GitHub shows only the
 phase. To back the tooling out, copy `"$backup"/deploy` back over `deploy/`, reinstall
 as in step 5, and set `DEPLOY_ENABLED=false` until fixed (the pre-fix script cannot
 apply grants for this image layout).

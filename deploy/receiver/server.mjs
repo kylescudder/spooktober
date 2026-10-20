@@ -1,7 +1,7 @@
 // Spooktober deploy webhook receiver. Internet-facing via Cloudflare Tunnel and
 // Caddy, so it has no Docker access: it verifies a signed request and drops it
 // into a spool directory. An event-driven host service picks it up and runs
-// deploy/herman-deploy.sh, which verifies the image attestation itself. A signed
+// deploy/host-deploy.sh, which verifies the image attestation itself. A signed
 // GET reports that release's sanitized status back from a read-only status directory.
 import { createHmac, timingSafeEqual, randomUUID } from "node:crypto";
 import { lstatSync, readFileSync, readdirSync, renameSync, writeFileSync, unlinkSync } from "node:fs";
