@@ -14,6 +14,11 @@ D = 'sha256:' + 'a' * 64
 R = 'b' * 40
 
 
+def docker_inspect(image, state, labels=None):
+    # Shaped like `docker inspect --format '{{json .}}' <container>`.
+    return json.dumps({'Id':'container','Config':{'Image':image,'Labels':labels,'Env':['UNUSED=1']},'State':state}).encode()
+
+
 class Deploy(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -227,6 +232,26 @@ class Deploy(unittest.TestCase):
         with patch.object(module,'run',self.fake_run),patch.object(module,'compose',self.fake_compose),patch.object(module,'start'):
             module.deploy(D,R,module.Progress(D,R,1))
         self.assertTrue((module.STATE/'history.log').exists())
+
+    def test_stopped_failed_candidate_is_replaced_and_never_restored(self):
+        log=[{'ExitCode':1,'Output':'3 | for (const path of paths) {\n'}]
+        stopped=docker_inspect(module.IMAGE+'@sha256:'+'c'*64,{'Status':'exited','Running':False,
+                               'Health':{'Status':'unhealthy','Log':log}},{})
+        def run(args,**kwargs):
+            if args[:2]==['docker','inspect']:return stopped
+            return self.fake_run(args,**kwargs)
+        stops=[]
+        def compose(*args,**kwargs):
+            if args[0]=='stop':stops.append(kwargs.get('image'))
+            return self.fake_compose(*args,**kwargs)
+        with patch.object(module,'run',run),patch.object(module,'compose',compose),patch.object(module,'start',side_effect=module.Error('unhealthy')) as start:
+            with self.assertRaises(module.Error):module.deploy(D,R)
+            self.assertEqual([c.args[0] for c in start.call_args_list],[module.IMAGE+'@'+D])
+        self.assertEqual(stops,[module.IMAGE+'@'+D])
+        with patch.object(module,'run',run),patch.object(module,'compose',compose),patch.object(module,'start') as start:
+            module.deploy(D,R)
+            start.assert_called_once_with(module.IMAGE+'@'+D)
+        self.assertIn('SPOOKTOBER_IMAGE='+module.IMAGE+'@'+D,(self.app/'.env').read_text())
 
 
 if __name__=='__main__':unittest.main()

@@ -186,7 +186,9 @@ def deploy(digest, requested_revision=None, progress=None):
     if len(ids) > 1:
         raise Error('Expected a single Spooktober container.')
     current = json.loads(run(['docker', 'inspect', '--format', '{{json .}}', ids[0]])) if ids else None
-    running = current['Config']['Image'] if current else None
+    # A stopped container, such as a failed first candidate, is neither the previous
+    # release to roll back to nor an already-healthy deployment.
+    running = current['Config']['Image'] if current and current['State'].get('Running') else None
     if running == candidate and current['State'].get('Health', {}).get('Status') == 'healthy':
         revision = (current['Config'].get('Labels') or {}).get('org.opencontainers.image.revision', '')
         if not REVISION.fullmatch(revision) or requested_revision and requested_revision != revision:
