@@ -1,4 +1,4 @@
-"""The release workflow's view of Herman: the real receiver, the real status writer and
+"""The release workflow's view of the host: the real receiver, the real status writer and
 the real wait script, with only the public health endpoint stubbed."""
 import http.server
 import importlib.util
@@ -14,9 +14,12 @@ import unittest
 import unittest.mock
 
 HERE = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location('deployer', HERE / 'herman-deploy.py')
-deployer = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(deployer)
+sys.path.insert(0, str(HERE))
+spec = importlib.util.spec_from_file_location('host_deploy', HERE / 'host-deploy.py')
+app = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(app)
+core = app.core
+core.configure(app.APP)
 
 D = 'sha256:' + 'a' * 64
 R = 'b' * 40
@@ -61,7 +64,7 @@ class AwaitRelease(unittest.TestCase):
         Health.revision = 'unknown'
         self.health = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Health)
         threading.Thread(target=self.health.serve_forever, daemon=True).start()
-        self.patch_status = unittest.mock.patch.object(deployer, 'STATUS', self.status_dir)
+        self.patch_status = unittest.mock.patch.object(core, 'STATUS', self.status_dir)
         self.patch_status.start()
 
     def tearDown(self):
@@ -85,14 +88,14 @@ class AwaitRelease(unittest.TestCase):
         return result, time.monotonic() - started
 
     def report(self, status, phase, rollback=None, digest=D, revision=R, requested=100):
-        deployer.write_status(digest, revision, status, phase, rollback, requested)
+        core.write_status(digest, revision, status, phase, rollback, requested)
 
     def test_terminal_host_failure_fails_immediately_not_after_the_timeout(self):
         self.report('failed', 'migrate')
         result, elapsed = self.wait(timeout='60')
         self.assertEqual(result.returncode, 1)
         self.assertLess(elapsed, 5)
-        self.assertIn('::error::Herman did not deploy ' + R, result.stdout)
+        self.assertIn('::error::The host did not deploy ' + R, result.stdout)
         self.assertIn('phase migrate', result.stdout)
         self.assertNotIn('access-secret', result.stdout + result.stderr)
         self.assertNotIn(SECRET, result.stdout + result.stderr)
@@ -109,7 +112,7 @@ class AwaitRelease(unittest.TestCase):
         result, elapsed = self.wait(timeout='60')
         self.assertEqual(result.returncode, 1)
         self.assertLess(elapsed, 8)
-        self.assertIn('Herman: running, phase verify', result.stdout)
+        self.assertIn('Host: running, phase verify', result.stdout)
         self.assertIn('phase grant', result.stdout)
 
     def test_superseded_request_is_a_failure(self):
@@ -127,7 +130,7 @@ class AwaitRelease(unittest.TestCase):
         result, _ = self.wait(timeout='1')
         self.assertEqual(result.returncode, 1)
         self.assertIn('did not report success', result.stdout)
-        self.assertNotIn('Herman reports success', result.stdout)
+        self.assertNotIn('The host reports success', result.stdout)
 
     def test_a_proxy_replaying_another_releases_success_is_not_believed(self):
         class Replay(http.server.BaseHTTPRequestHandler):
@@ -148,7 +151,7 @@ class AwaitRelease(unittest.TestCase):
             replay.shutdown()
             replay.server_close()
         self.assertEqual(result.returncode, 1)
-        self.assertNotIn('Herman reports success', result.stdout)
+        self.assertNotIn('The host reports success', result.stdout)
 
     def test_stale_status_from_an_earlier_attempt_of_the_same_release_is_ignored(self):
         self.report('failed', 'migrate', requested=50)
@@ -156,7 +159,7 @@ class AwaitRelease(unittest.TestCase):
         result, _ = self.wait(timeout='1', REQUEST_TIMESTAMP='100')
         self.assertEqual(result.returncode, 1)
         self.assertIn('earlier request', result.stdout)
-        self.assertNotIn('Herman did not deploy', result.stdout)
+        self.assertNotIn('The host did not deploy', result.stdout)
         # The new attempt then overwrites it and is believed.
         threading.Timer(0.5, self.report, ('succeeded', 'complete')).start()
         result, _ = self.wait(timeout='10', REQUEST_TIMESTAMP='100')
@@ -167,7 +170,7 @@ class AwaitRelease(unittest.TestCase):
         Health.revision = R
         result, _ = self.wait()
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn('Herman reports success', result.stdout)
+        self.assertIn('The host reports success', result.stdout)
         self.assertIn(f'Production is running {R}', result.stdout)
 
     def test_host_success_alone_is_not_enough(self):
@@ -181,7 +184,7 @@ class AwaitRelease(unittest.TestCase):
         Health.revision = R
         result, _ = self.wait(timeout='1')
         self.assertEqual(result.returncode, 1)
-        self.assertIn('Herman did not report success', result.stdout)
+        self.assertIn('The host did not report success', result.stdout)
 
     def test_a_stalled_host_fails_at_the_bounded_timeout(self):
         self.report('running', 'start')

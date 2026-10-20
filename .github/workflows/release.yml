@@ -113,9 +113,9 @@ jobs:
           DIGEST: ${{ steps.manifest.outputs.digest }}
         run: docker buildx imagetools create -t "$IMAGE:main" "$IMAGE@$DIGEST"
 
-  # Asks Herman to deploy the attested digest, then requires Herman to report this
+  # Asks the host to deploy the attested digest, then requires the host to report this
   # exact digest and revision deployed (failing promptly if it reports a failure)
-  # and the public site to serve that revision. Herman verifies the attestation
+  # and the public site to serve that revision. The host verifies the attestation
   # itself, so the webhook secret can only trigger a release built from main.
   deploy:
     needs: publish
@@ -167,7 +167,7 @@ jobs:
             -H 'X-Spooktober-Signature: sha256=invalid' --data '{}' "$DEPLOY_URL")
           [[ "$status" = 401 ]] || { echo "::error::Invalid webhook signature returned $status."; exit 1; }
           grep -qi '^x-spooktober-deploy-hook: 1' "$headers" || { echo '::error::Service token did not reach the receiver.'; exit 1; }
-      - name: Check Herman can report release status
+      - name: Check the host can report release status
         env:
           DIGEST: ${{ needs.publish.outputs.digest }}
           REVISION: ${{ github.sha }}
@@ -193,10 +193,10 @@ jobs:
             -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
             -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
             --data "$body"
-      # Fails as soon as Herman reports a terminal failure for this digest and
+      # Fails as soon as the host reports a terminal failure for this digest and
       # revision; stalled hosts fail at HOST_TIMEOUT. Success needs both the host's
       # report and the public site serving this revision.
-      - name: Wait for Herman and production
+      - name: Wait for the host and production
         env:
           DIGEST: ${{ needs.publish.outputs.digest }}
           REVISION: ${{ github.sha }}
