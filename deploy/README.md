@@ -21,7 +21,7 @@ for the shared platform. This file owns the application's deployment commands.
 
 ## Deployer
 
-`application hooks` holds this app's settings and hooks; the
+Application-specific behavior is in `hooks.py`; deployment definitions are central.
 
 ## Actual configuration
 
@@ -35,7 +35,7 @@ for the shared platform. This file owns the application's deployment commands.
 | Database roles | `spooktober_owner` for migrations and grants, `spooktober_runtime` for the app |
 | Hook hostname/path | `deploy.kylescudder.co.uk/hooks/spooktober` |
 | Hook upstream | `spooktober-deploy-hook:9000` on `platform-web` only |
-| Host trigger | launchd `com.kylescudder.deploy-core`, `QueueDirectories` |
+| Host trigger | launchd `com.kylescudder.deploy-core`, independent app workers |
 | Deploy identity | Kyle, UID/GID `501:20`, owner of the Colima session |
 | GitHub environment | `production`, restricted to branch `main`, no required reviewers |
 
@@ -175,8 +175,7 @@ The final command deploys or rolls back to an attested main image. Successful
 releases persist their digest into `.env`, so a normal Compose restart keeps
 the selected release. Pre-deploy JSON exports retain the most recent 14.
 
-QueueDirectories starts the deployer when requests are present; it does not
-poll GitHub. Pausing automatic requests leaves manual deployment available:
+The shared supervisor scans app queues every two seconds; it does not poll GitHub. Pausing automatic requests leaves manual deployment available:
 
 ```sh
 gh variable set DEPLOY_ENABLED --body false --repo kylescudder/spooktober
@@ -185,15 +184,14 @@ gh variable set DEPLOY_ENABLED --body false --repo kylescudder/spooktober
 To stop the host trigger as well:
 
 ```sh
-launchctl bootout gui/501/com.kylescudder.deploy-core
+# Set only this app to enabled: false in the central apps.json registry.
 ```
 
-Resume the agent with the installer; existing queued requests then run. Set
+Set this app to enabled: true to resume; existing queued requests then run. Set
 `DEPLOY_ENABLED=true` only after public routing, Access and app readiness pass.
 
 The app does not update its source checkout automatically. After reviewing and
-pulling changes to `compose.yaml` or `deploy/`, recreate the receiver and rerun
-the launchd installer if it changed. App releases themselves use published
+pulling changes to `compose.yaml` or `deploy/`, recreate the receiver if its definition changed and validate the central app registry. App releases themselves use published
 images; they do not build source on the host. Rotate the HMAC secret locally,
 update the GitHub secret through private stdin, then recreate the receiver.
 
