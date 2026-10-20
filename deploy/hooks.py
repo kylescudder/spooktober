@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Spooktober settings and hooks for the shared host deployer (deploy_core.py)."""
+"""Spooktober application-owned hooks for the installed deployment service."""
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -51,15 +51,3 @@ def prepare(candidate, current):
     core.progress.publish('running', 'grant')
     core.run(grant)
     core.log('migrations and runtime grants applied')
-
-
-APP = core.App(
-    name='spooktober', title='Spooktober',
-    image='ghcr.io/kylescudder/spooktober', repo='kylescudder/spooktober',
-    image_var='SPOOKTOBER_IMAGE', service='spooktober', app_dir=Path(__file__).resolve().parents[1],
-    prepare=prepare,
-    release_status=True,
-    backups=True)
-
-if __name__ == '__main__':
-    core.cli(APP, __file__)

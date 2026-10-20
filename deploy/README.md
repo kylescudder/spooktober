@@ -1,15 +1,27 @@
 # Spooktober on the host
 
+## Shared deployment service
+
+This app is registered as `spooktober` in the central deployment registry
+`/Users/kyle/platform/deploy-core/apps.json`. LaunchAgent
+`com.kylescudder.deploy-core` runs the single installed engine. Application hooks
+are `deploy/hooks.py`; the receiver, credentials, queues,
+state and database contracts below remain app-specific. Manual deployment uses
+`./deploy/host-deploy.sh sha256:<digest>`.
+
+Engine updates, application registration, failure inspection and service rollback
+are documented in [deploy-core](https://github.com/kylescudder/deploy-core).
+There are no vendored engine files, lock files or sync PRs. Do not install an
+app-specific LaunchAgent. Apply future engine changes once through the central service.
+
+
 The host is ARM macOS with Colima, not a Linux/systemd host. Read
 `/Users/kyle/platform/runbook.md` and use the host deployment and operations runbooks
 for the shared platform. This file owns the application's deployment commands.
 
 ## Deployer
 
-`deploy/host-deploy.py` holds this app's settings and hooks; the
-shared flow is `deploy/deploy_core.py`, vendored unchanged from
-`kylescudder/deploy-core` (see `deploy/deploy_core.lock`). Change the core
-there and sync it; CI fails if the vendored copy is edited here.
+`application hooks` holds this app's settings and hooks; the
 
 ## Actual configuration
 
@@ -23,7 +35,7 @@ there and sync it; CI fails if the vendored copy is edited here.
 | Database roles | `spooktober_owner` for migrations and grants, `spooktober_runtime` for the app |
 | Hook hostname/path | `deploy.kylescudder.co.uk/hooks/spooktober` |
 | Hook upstream | `spooktober-deploy-hook:9000` on `platform-web` only |
-| Host trigger | launchd `com.kylescudder.spooktober-deploy`, `QueueDirectories` |
+| Host trigger | launchd `com.kylescudder.deploy-core`, `QueueDirectories` |
 | Deploy identity | Kyle, UID/GID `501:20`, owner of the Colima session |
 | GitHub environment | `production`, restricted to branch `main`, no required reviewers |
 
@@ -152,8 +164,7 @@ From the checkout, with private configuration already installed:
 
 ```sh
 docker compose -f deploy/compose.deploy-hook.yaml --env-file .env.deploy-hook up -d --force-recreate --wait
-python3 -B deploy/host-deploy.py --install <host LocalHostName>
-launchctl print gui/501/com.kylescudder.spooktober-deploy
+launchctl print gui/501/com.kylescudder.deploy-core
 tail -n 100 state/deploy.log
 docker compose -f deploy/compose.deploy-hook.yaml --env-file .env.deploy-hook logs --tail 50
 cat state/history.log
@@ -174,7 +185,7 @@ gh variable set DEPLOY_ENABLED --body false --repo kylescudder/spooktober
 To stop the host trigger as well:
 
 ```sh
-launchctl bootout gui/501/com.kylescudder.spooktober-deploy
+launchctl bootout gui/501/com.kylescudder.deploy-core
 ```
 
 Resume the agent with the installer; existing queued requests then run. Set
@@ -336,109 +347,3 @@ green and public health reports that same 40-character revision. Real
 Kyle/Rhiann login, logout and simultaneous edits require their actual sessions;
 trusted-session integration tests alone do not establish that manual acceptance.
 
-## Host rollout
-
-Routine image releases do **not** update the host's checkout, deployer, receiver or
-LaunchAgent, and the host's checkout can be older than `main`. Tooling changes such as
-status reporting must be installed by hand. Everything below works over SSH with
-Kyle's existing access; nothing needs the desktop, a screen share or an unlocked
-screen. Never print `.env*`, `secrets/` or the webhook secret.
-
-Read `/Users/kyle/platform/runbook.md` and the host deployment and operations runbooks
-first, and follow them where they differ. Treat this section as app-specific detail.
-
-**Order.** Merge the PR first. The new Release run builds the image, then its deploy
-job stops at *Check the host can report release status* with nothing queued, so
-production stays on its current revision. Roll out below, then re-run that deploy job.
-(Rolling out first is also safe: the host tooling is compatible with the old workflow.)
-Do not re-deploy the old `3f8c1ee` digest or re-run its Release: that image lacks
-`grant` and its dependency layout cannot apply grants.
-
-```sh
-cd /Users/kyle/platform/apps/spooktober
-```
-
-1. **Record the current state.**
-   ```sh
-   git status --short; git rev-parse HEAD
-   curl -sI https://spooktober.kylescudder.co.uk/healthz | grep -i x-spooktober-revision
-   cat state/deployment.json; cat state/last-failure.json; tail -n 40 state/deploy.log
-   launchctl print gui/501/com.kylescudder.spooktober-deploy | head -20
-   ```
-   Production should report `c2e9ba46650a43c3ba1d5026771adccde38b8e52` (the failed
-   release changed nothing).
-
-2. **Reconcile host-specific changes before replacing anything.**
-   ```sh
-   backup=state/rollout-$(date -u +%Y%m%dT%H%M%SZ); mkdir -p -m 700 "$backup"
-   cp -Rp deploy compose.yaml "$backup"/
-   cp -p ~/Library/LaunchAgents/com.kylescudder.spooktober-deploy.plist "$backup"/
-   git fetch origin
-   git diff HEAD -- deploy compose.yaml             # host-local edits not in Git
-   git diff HEAD origin/main -- deploy compose.yaml # what the rollout changes
-   ```
-   Host-local differences are expected (the host already uses `spooktober_runtime`;
-   check for Colima paths, `PATH`, Docker config or network names too). Everything
-   host-specific must survive: if a host edit is not already in `origin/main`, port it
-   into the update rather than overwriting it. The repository now carries
-   `RUNTIME_ROLE = 'spooktober_runtime'` and database `spooktober`; it must not
-   regress to `proj_spooktober_*` anywhere.
-
-3. **Update the checkout.** If the tree is clean, `git pull --ff-only origin main`.
-   If it has host edits, commit them on a local branch first, then merge
-   `origin/main` and resolve conflicts as in step 2. Confirm
-   `git diff origin/main -- deploy compose.yaml` shows only intentional host edits.
-
-4. **Test the installed tooling** (no production effect). The host may lack Node; run
-   the receiver tests in a container:
-   ```sh
-   python3 -B -m unittest discover -s deploy -p test_deploy.py -v
-   docker run --rm -v "$PWD/deploy:/deploy:ro" node:22-alpine node --test /deploy/receiver/server.test.mjs
-   ```
-
-5. **Install.** Stop the agent so a request cannot arrive mid-swap (queued requests
-   wait; they are not lost), create the status directory, recreate the receiver, and
-   reinstall the agent:
-   ```sh
-   launchctl bootout gui/501/com.kylescudder.spooktober-deploy
-   mkdir -p -m 700 deploy-spool/status
-   docker compose -f deploy/compose.deploy-hook.yaml --env-file .env.deploy-hook up -d --force-recreate --wait
-   python3 -B deploy/host-deploy.py --install <host LocalHostName>
-   launchctl print gui/501/com.kylescudder.spooktober-deploy | head -20
-   plutil -p ~/Library/LaunchAgents/com.kylescudder.spooktober-deploy.plist   # compare with "$backup"
-   ```
-   `.env.deploy-hook` must resolve `DEPLOY_SPOOL_DIR` (if it sets one) to the directory
-   holding `requests` and `status`. If `launchctl bootstrap` reports the GUI domain is
-   unavailable, stop and report it: Colima also needs that session.
-
-6. **Verify the receiver reports status** without exposing the secret. This signs a
-   request for an arbitrary release inside the container and prints only the reply,
-   expected `"status":"pending"`:
-   ```sh
-   docker compose -f deploy/compose.deploy-hook.yaml --env-file .env.deploy-hook exec -T deploy-hook node -e '
-   const c=require("crypto"),fs=require("fs"),s=fs.readFileSync("/run/secrets/deploy_webhook_secret","utf8").trim();
-   const d="sha256:"+"0".repeat(64),r="0".repeat(40),t=Math.floor(Date.now()/1000);
-   const g=c.createHmac("sha256",s).update(`status\n${d}\n${r}\n${t}`).digest("hex");
-   fetch(`http://127.0.0.1:9000/hooks/spooktober?digest=${d}&revision=${r}&timestamp=${t}`,{headers:{"X-Spooktober-Signature":"sha256="+g}}).then(x=>x.text()).then(console.log)'
-   docker inspect --format '{{range .Mounts}}{{.Destination}} rw={{.RW}}{{"\n"}}{{end}}' $(docker compose -f deploy/compose.deploy-hook.yaml --env-file .env.deploy-hook ps -q deploy-hook)
-   ```
-   The `/spool/status` mount must show `rw=false`.
-
-7. **Release and watch.** Re-run the failed *deploy* job of the new commit's Release
-   (or merge a change if it has not run). It should pass *Check the host can report
-   release status*, then log `Host: running, phase …` through to
-   `The host reports success` and `Production is running <commit>`. On the host:
-   ```sh
-   tail -n 60 state/deploy.log
-   cat state/deployment.json state/history.log
-   cat deploy-spool/status/*-<digest-hex>.json          # succeeded / complete
-   curl -sI https://spooktober.kylescudder.co.uk/healthz | grep -i x-spooktober-revision
-   ```
-   Also confirm a pre-deploy backup was written under `backups/` and that the app
-   still loads for Kyle and Rhiann.
-
-**If it fails.** The app stays on, or is restored to, the previous image. Read
-`state/last-failure.json` and `state/deploy.log` on the host; GitHub shows only the
-phase. To back the tooling out, copy `"$backup"/deploy` back over `deploy/`, reinstall
-as in step 5, and set `DEPLOY_ENABLED=false` until fixed (the pre-fix script cannot
-apply grants for this image layout).
