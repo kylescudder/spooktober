@@ -175,6 +175,27 @@ def migration_commands(candidate, db_network):
     return [[*base, 'node', 'database.cjs', 'migrate'], [*base, 'node', 'database.cjs', 'grant', RUNTIME_ROLE]]
 
 
+def parse_json(raw, what):
+    try:
+        return json.loads(raw)
+    except ValueError:
+        # Never echo the data: it may contain container logs or credentials.
+        raise Error(f'{what} returned unexpected output.') from None
+
+
+def inspect_current(container):
+    # Parse the whole document rather than a delimited --format string: health check
+    # logs from a failed candidate contain arbitrary text, including '|' and newlines.
+    # Keep only the fields the deployer uses so nothing else is carried around.
+    info = parse_json(run(['docker', 'inspect', container]), 'docker inspect')[0]
+    state = info.get('State') or {}
+    health = state.get('Health') or {}
+    return {'Config': {'Image': (info.get('Config') or {}).get('Image'),
+                       'Labels': (info.get('Config') or {}).get('Labels') or {}},
+            'State': {'Running': bool(state.get('Running')), 'Status': state.get('Status'),
+                      'Health': {'Status': health.get('Status')}}}
+
+
 def deploy(digest, requested_revision=None, progress=None):
     progress = progress or Progress(digest, None)
     if not DIGEST.fullmatch(digest):
@@ -182,10 +203,11 @@ def deploy(digest, requested_revision=None, progress=None):
     runtime = private_env(APP / '.env')
     private_env(APP / '.env.migration')
     candidate = f'{IMAGE}@{digest}'
-    ids = compose('ps', '-a', '-q', 'spooktober').decode().strip().splitlines()
+    # compose.yaml requires the image variable, which .env lacks before the first release.
+    ids = compose('ps', '-a', '-q', 'spooktober', image=candidate).decode().strip().splitlines()
     if len(ids) > 1:
         raise Error('Expected a single Spooktober container.')
-    current = json.loads(run(['docker', 'inspect', '--format', '{{json .}}', ids[0]])) if ids else None
+    current = inspect_current(ids[0]) if ids else None
     # A stopped container, such as a failed first candidate, is neither the previous
     # release to roll back to nor an already-healthy deployment.
     running = current['Config']['Image'] if current and current['State'].get('Running') else None
@@ -203,7 +225,8 @@ def deploy(digest, requested_revision=None, progress=None):
          '--signer-workflow', REPO + '/.github/workflows/release.yml', '--source-ref', 'refs/heads/main',
          '--deny-self-hosted-runners'], timeout=180)
     run(['docker', 'pull', '--quiet', candidate], timeout=300)
-    labels = json.loads(run(['docker', 'image', 'inspect', '--format', '{{json .Config.Labels}}', candidate])) or {}
+    labels = parse_json(run(['docker', 'image', 'inspect', '--format', '{{json .Config.Labels}}', candidate]),
+                        'docker image inspect') or {}
     revision = labels.get('org.opencontainers.image.revision', '')
     if not REVISION.fullmatch(revision) or requested_revision and requested_revision != revision:
         raise Error('Verified image revision does not match the request.')
