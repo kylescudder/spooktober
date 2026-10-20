@@ -3,7 +3,7 @@
 # It has no Docker socket and no database access; it only writes signed
 # requests into the spool directory consumed by the host's event-driven service,
 # and reports that service's sanitized release status from a read-only mount.
-# Create deploy-spool/status first (host-deploy.py --install does) or Docker will.
+# Create deploy-spool/status first (central service registration does) or Docker will.
 name: spooktober-deploy-hook
 
 services:

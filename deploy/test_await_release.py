@@ -1,6 +1,7 @@
-"""The release workflow's view of the host: the real receiver, the real status writer and
+"""The release workflow's view of the host: the real receiver, status protocol fixtures and
 the real wait script, with only the public health endpoint stubbed."""
 import http.server
+import json
 import importlib.util
 import os
 from pathlib import Path
@@ -15,11 +16,6 @@ import unittest.mock
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-spec = importlib.util.spec_from_file_location('host_deploy', HERE / 'host-deploy.py')
-app = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(app)
-core = app.core
-core.configure(app.APP)
 
 D = 'sha256:' + 'a' * 64
 R = 'b' * 40
@@ -64,11 +60,8 @@ class AwaitRelease(unittest.TestCase):
         Health.revision = 'unknown'
         self.health = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Health)
         threading.Thread(target=self.health.serve_forever, daemon=True).start()
-        self.patch_status = unittest.mock.patch.object(core, 'STATUS', self.status_dir)
-        self.patch_status.start()
 
     def tearDown(self):
-        self.patch_status.stop()
         self.receiver.kill()
         self.receiver.wait()
         self.receiver.stdout.close()
@@ -88,7 +81,10 @@ class AwaitRelease(unittest.TestCase):
         return result, time.monotonic() - started
 
     def report(self, status, phase, rollback=None, digest=D, revision=R, requested=100):
-        core.write_status(digest, revision, status, phase, rollback, requested)
+        # Producer behavior is tested in deploy-core; exercise this app's wire protocol.
+        value=dict(digest=digest,revision=revision,status=status,phase=phase,requested=requested)
+        if rollback:value['rollback']=rollback
+        (self.status_dir/f'{revision}-{digest.removeprefix("sha256:")}.json').write_text(json.dumps(value))
 
     def test_terminal_host_failure_fails_immediately_not_after_the_timeout(self):
         self.report('failed', 'migrate')
