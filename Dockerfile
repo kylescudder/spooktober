@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM oven/bun:1.4.2-alpine AS bun
 
-FROM node:22-alpine AS build
+FROM node:24-alpine AS build
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /app
 COPY package.json bun.lock ./
@@ -12,7 +12,7 @@ COPY src/ ./src/
 COPY public/ ./public/
 RUN bun run typecheck && bun run test && bun run build
 
-FROM node:22-alpine AS runtime
+FROM node:24-alpine AS runtime
 WORKDIR /app
 ARG SPOOKTOBER_REVISION=unknown
 ENV SPOOKTOBER_REVISION=$SPOOKTOBER_REVISION
