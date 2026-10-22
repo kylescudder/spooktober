@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM oven/bun:1.4.2-alpine AS bun
+FROM oven/bun:1.4.4-alpine AS bun
 
 FROM node:24-alpine AS build
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
