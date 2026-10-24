@@ -2,6 +2,7 @@ import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import type { Pool } from "pg";
 import { addFilm, createDatabase, grantRuntimeAccess, importFilms, listFilms, markWatched, migrateDatabase, readyDatabase, reorderFilms } from "./database.ts";
@@ -23,6 +24,54 @@ async function testDatabase(t: TestContext) {
 }
 
 const seed = async () => parseWatchlist(await readFile("src/seed.json"));
+
+test("deployment CLI exports and restores every season when the current year is empty", async (t) => {
+  const { pool, url } = await testDatabase(t);
+  await migrateDatabase(pool);
+  const films = parseWatchlist(JSON.stringify({ films: [
+    { id: "historical-1", title: "Halloween", watched: true, watchedAt: "2020-10-31T23:00:00.123456789Z", updatedAt: "2020-10-31T23:00:00.123456789Z" },
+    { id: "historical-2", title: "The Thing", watched: false, updatedAt: "2020-10-01T12:00:00Z" },
+  ] }));
+  await importFilms(pool, films, 2020);
+  await addFilm(pool, randomUUID(), "Alien", 2021);
+  assert.deepEqual(await listFilms(pool), []);
+  const cli = (databaseURL: URL, args: string[], input?: string) => new Promise<string>((resolve, reject) => {
+    const child = execFile(process.execPath, ["--import", "tsx", "src/server/cli.ts", ...args], {
+      env: { ...process.env, DATABASE_URL: databaseURL.href },
+    }, (error, stdout) => error ? reject(error) : resolve(stdout));
+    child.stdin!.end(input);
+  });
+  const snapshot = await cli(url, ["export", "-"]);
+  const backup = JSON.parse(snapshot);
+  assert.deepEqual(backup.films.map(({ year, title }: { year: number; title: string }) => [year, title]), [
+    [2020, "Halloween"], [2020, "The Thing"], [2021, "Alien"],
+  ]);
+  const { pool: restored, url: restoredURL } = await testDatabase(t);
+  await migrateDatabase(restored);
+  await cli(restoredURL, ["import", "-"], snapshot);
+  for (const year of [2020, 2021]) assert.deepEqual(await listFilms(restored, year), await listFilms(pool, year));
+  assert.deepEqual(await listFilms(restored), []);
+  await assert.rejects(cli(restoredURL, ["import", "-"], snapshot));
+  await assert.rejects(cli(restoredURL, ["import", "-", "--year", "2022"], snapshot));
+  assert.deepEqual(await listFilms(restored, 2022), []);
+  const single = JSON.parse(await cli(url, ["export", "-", "--year", "2020"]));
+  assert.deepEqual(single.films, await listFilms(pool, 2020));
+});
+
+test("a late conflict in a multi-season restore rolls back every inserted season", async (t) => {
+  const { pool } = await testDatabase(t);
+  await migrateDatabase(pool);
+  const existing = parseWatchlist(JSON.stringify({ films: [{ id: "already-present", title: "Alien", watched: false }] }));
+  await importFilms(pool, existing, 2019);
+  const snapshot = parseWatchlist(JSON.stringify({ films: [
+    { id: "first-season", title: "Halloween", watched: false, year: 2020 },
+    { id: "already-present", title: "Alien", watched: false, year: 2021 },
+  ] }));
+  await assert.rejects(importFilms(pool, snapshot));
+  assert.deepEqual(await listFilms(pool, 2020), []);
+  assert.deepEqual(await listFilms(pool, 2021), []);
+  assert.deepEqual(await listFilms(pool, 2019), existing);
+});
 
 test("annual lists keep additions, watched progress and order separate", async (t) => {
   const { pool } = await testDatabase(t);

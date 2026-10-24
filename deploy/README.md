@@ -309,20 +309,32 @@ docker compose run --rm --no-deps spooktober node database.cjs seed
 docker compose run --rm --no-deps -T spooktober node database.cjs import - < backups/hosted-watchlist-cutover.json
 ```
 
-Seed/import refuse to overwrite populated data; invalid imports are atomic.
-JSON array order defines film positions, with IDs and watched flags retained.
+Seed/import refuse to overwrite populated target years; invalid imports are atomic.
+JSON array order defines film positions within each year, with IDs and watched flags retained.
 Timestamps normalize to UTC with nanosecond precision; unknown viewing dates
 remain `null`. Existing populated PostgreSQL data can be used directly.
 
-For a private portable JSON snapshot:
+For a private portable JSON snapshot of every season:
 
 ```sh
 umask 077
 docker compose exec -T spooktober node database.cjs export - > watchlist-backup.json
 ```
 
-Check the export's exit status before using it as a backup. Restore by importing
-into an empty migrated database. Local source commands use `bun run db` with
+The default export includes `year` on every film and covers historical and future
+seasons even when this year's list is empty. Pre-deploy backups use this command,
+validate year associations before promoting the snapshot, and only then rotate
+older backups. The first upgrade also accepts untagged backups from the original
+single-season image; restore those with `import --year 2026`.
+
+Check the export's exit status before using it as a backup. Restore an all-season
+snapshot with `node database.cjs import - < watchlist-backup.json` into an empty
+migrated database: years, order, progress and timestamp precision are preserved
+in one transaction. `export - --year 2026` instead exports one season without
+year tags; restore it with `import - --year 2026`. Seed and untagged imports
+default to the current year. Imports reject mixed tagged/untagged records,
+conflicting `--year`, duplicate IDs and populated target years. Limits are
+16 MiB, 100000 films total and 1000 per season. Local source commands use `bun run db` with
 the same `migrate`, `seed`, `import` and `export` arguments. For local PostgreSQL
 and app startup, follow the [root README](../README.md#run-locally-with-docker).
 

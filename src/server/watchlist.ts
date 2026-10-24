@@ -3,7 +3,7 @@ import { createReadStream } from "node:fs";
 import { open, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { Film } from "../lib/films.ts";
+import type { Film, ImportedFilm } from "../lib/films.ts";
 import { watchlistImportSchema } from "../lib/validation.ts";
 
 // Date only has millisecond precision; retain the original fractional seconds.
@@ -24,34 +24,44 @@ export function normalizeTimestamp(value: unknown): string {
   return `${date.toISOString().split(".")[0]}${precision ? `.${precision}` : ""}Z`;
 }
 
-export function parseWatchlist(data: Uint8Array | string): Film[] {
-  if (Buffer.byteLength(data) > 1024 * 1024) throw new Error("Watchlist import exceeds 1 MiB.");
+const importLimit = 16 * 1024 * 1024;
+
+export function parseWatchlist(data: Uint8Array | string): ImportedFilm[] {
+  if (Buffer.byteLength(data) > importLimit) throw new Error("Watchlist import exceeds 16 MiB.");
   let input: unknown;
   try { input = JSON.parse(typeof data === "string" ? data : Buffer.from(data).toString("utf8")); }
   catch { throw new Error("Import must contain valid watchlist JSON."); }
   const parsed = watchlistImportSchema.safeParse(input);
-  if (!parsed.success) throw new Error("Import must contain valid films with IDs, titles, watched flags and timestamps (at most 1000 films).");
+  if (!parsed.success) throw new Error("Import must contain valid films with IDs, titles, watched flags, years and timestamps (at most 100000 films total).");
   const films = parsed.data.films;
   const seen = new Set<string>();
-  return films.map((film, position): Film => {
+  const positions = new Map<number | undefined, number>();
+  if (films.some((film) => film.year !== undefined) && films.some((film) => film.year === undefined)) {
+    throw new Error("Import must either specify a year for every film or omit all years for a single season.");
+  }
+  return films.map((film): ImportedFilm => {
+    const position = positions.get(film.year) ?? 0;
+    if (position >= 1000) throw new Error("Import exceeds 1000 films in one year.");
+    positions.set(film.year, position + 1);
     if (seen.has(film.id)) throw new Error("Import contains a repeated film.");
     seen.add(film.id);
     const watchedAt = film.watchedAt == null ? null : normalizeTimestamp(film.watchedAt);
     if (!film.watched && watchedAt !== null) throw new Error("An unwatched film cannot have a watched date.");
     const updatedAt = film.updatedAt === undefined || film.updatedAt === "" ? new Date().toISOString() : normalizeTimestamp(film.updatedAt);
     const createdAt = film.createdAt === undefined || film.createdAt === "" ? updatedAt : normalizeTimestamp(film.createdAt);
-    return { id: film.id, title: film.title, position, watched: film.watched, watchedAt, updatedAt, createdAt };
+    return { id: film.id, title: film.title, position, watched: film.watched, watchedAt, updatedAt, createdAt,
+      ...(film.year === undefined ? {} : { year: film.year }) };
   });
 }
 
-export async function readWatchlist(source: string): Promise<Film[]> {
+export async function readWatchlist(source: string): Promise<ImportedFilm[]> {
   const stream = source === "-" ? process.stdin : createReadStream(source);
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of stream) {
     const bytes = Buffer.from(chunk);
     size += bytes.byteLength;
-    if (size > 1024 * 1024) throw new Error("Watchlist import exceeds 1 MiB.");
+    if (size > importLimit) throw new Error("Watchlist import exceeds 16 MiB.");
     chunks.push(bytes);
   }
   return parseWatchlist(Buffer.concat(chunks));

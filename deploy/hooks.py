@@ -23,10 +23,19 @@ def backup_watchlist():
     backup = core.BACKUPS / f'pre-deploy-{stamp}.json'
     partial = backup.with_suffix('.json.partial')
     with partial.open('wb') as stream:
+        # Default export covers every season, with a year on each film. Keep
+        # this command compatible with the original single-season image so
+        # the first annual-watchlist upgrade can back up before migrating.
         core.compose('exec', '-T', 'spooktober', 'node', 'database.cjs', 'export', '-', output=stream)
     try:
         content = json.loads(partial.read_text())
-        if not isinstance(content.get('films'), list):
+        films = content.get('films')
+        if not isinstance(films, list) or any(not isinstance(film, dict) for film in films):
+            raise ValueError()
+        # Entirely untagged snapshots come from the pre-year release (2026).
+        # A new snapshot must tag every film with a valid calendar year.
+        if any('year' in film for film in films) and any(
+                type(film.get('year')) is not int or not 1900 <= film['year'] <= 9999 for film in films):
             raise ValueError()
     except (ValueError, AttributeError):
         raise core.Error('Pre-deploy watchlist export was invalid.') from None

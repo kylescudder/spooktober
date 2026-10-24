@@ -56,6 +56,45 @@ def record_hooks():
 
 
 class Hooks(unittest.TestCase):
+    def test_backups_reject_invalid_or_partial_year_tags_before_rotating_history(self):
+        for films in ([{'year': 2026}, {}], [{'year': '2026'}], [{'year': True}], [{'year': 10000}], ['invalid']):
+            with self.subTest(films=films), tempfile.TemporaryDirectory() as temp:
+                core = types.ModuleType('deploy_core')
+                core.Error = RuntimeError; core.KEEP_BACKUPS = 1
+                core.BACKUPS = Path(temp); core.log = Mock()
+                previous = core.BACKUPS / 'pre-deploy-20000101.json'
+                previous.write_text('{"films":[]}')
+                def compose(*args, **kwargs):
+                    kwargs['output'].write(json.dumps({'films': films}).encode())
+                core.compose = compose
+                with patch.dict(sys.modules, {'deploy_core': core}):
+                    spec = importlib.util.spec_from_file_location('backup_hooks', HERE / 'hooks.py')
+                    hooks = importlib.util.module_from_spec(spec); spec.loader.exec_module(hooks)
+                    with self.assertRaisesRegex(RuntimeError, 'export was invalid'):
+                        hooks.backup_watchlist()
+                self.assertTrue(previous.exists())
+                self.assertEqual(list(core.BACKUPS.glob('pre-deploy-*.json')), [previous])
+
+    def test_backups_preserve_all_years_and_accept_the_original_release_during_upgrade(self):
+        for films in ([{'id': 'old', 'year': 2020}, {'id': 'new', 'year': 2021}], [{'id': 'legacy'}], []):
+            with self.subTest(films=films), tempfile.TemporaryDirectory() as temp:
+                core = types.ModuleType('deploy_core')
+                core.Error = RuntimeError; core.KEEP_BACKUPS = 1
+                core.BACKUPS = Path(temp); core.log = Mock()
+                previous = core.BACKUPS / 'pre-deploy-20000101.json'
+                previous.write_text('{"films":[]}')
+                def compose(*args, **kwargs):
+                    kwargs['output'].write(json.dumps({'films': films}).encode())
+                core.compose = compose
+                with patch.dict(sys.modules, {'deploy_core': core}):
+                    spec = importlib.util.spec_from_file_location('backup_hooks', HERE / 'hooks.py')
+                    hooks = importlib.util.module_from_spec(spec); spec.loader.exec_module(hooks)
+                    hooks.backup_watchlist()
+                backups = list(core.BACKUPS.glob('pre-deploy-*.json'))
+                self.assertEqual(len(backups), 1)
+                self.assertEqual(json.loads(backups[0].read_text()), {'films': films})
+                self.assertFalse(previous.exists())
+
     def test_app_owned_commands_preserve_the_audited_contract(self):
         expected=json.loads((HERE/'hook-commands.json').read_text())
         self.assertEqual(record_hooks(),expected)

@@ -2,7 +2,7 @@ import "@tanstack/react-start/server-only";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import pg, { type Pool, type PoolClient, type PoolConfig } from "pg";
-import type { Film } from "../lib/films.ts";
+import type { AnnualFilm, Film, ImportedFilm } from "../lib/films.ts";
 import { FilmError, completeOrder } from "../lib/validation.ts";
 import { currentYear } from "../lib/years.ts";
 
@@ -112,6 +112,14 @@ export async function listFilms(db: Queryable, year = currentYear()): Promise<Fi
   return rows;
 }
 
+// Deployment snapshots must include historical and future seasons even when
+// the current year's list is empty. Keep each season's viewing order.
+export async function listAllFilms(db: Queryable): Promise<AnnualFilm[]> {
+  const { rows } = await db.query<AnnualFilm>(`SELECT id,title,position,watched,year,watched_at AS "watchedAt",
+    updated_at AS "updatedAt",created_at AS "createdAt" FROM films ORDER BY year,position,id`);
+  return rows;
+}
+
 async function changeFilms(pool: Pool, year: number, change: (client: PoolClient) => Promise<void>): Promise<Film[]> {
   return transaction(pool, async (client) => { await change(client); return listFilms(client, year); });
 }
@@ -147,14 +155,19 @@ export async function reorderFilms(pool: Pool, requested: string[], year = curre
   });
 }
 
-export async function importFilms(pool: Pool, films: Film[], year = currentYear()) {
+export async function importFilms(pool: Pool, films: ImportedFilm[], year?: number) {
+  if (year !== undefined && films.some((film) => film.year !== undefined && film.year !== year)) {
+    throw new Error("The imported films do not all belong to the requested year.");
+  }
+  const fallbackYear = year ?? currentYear();
+  const years = films.length ? [...new Set(films.map((film) => film.year ?? fallbackYear))] : [fallbackYear];
   await readyDatabase(pool);
   await transaction(pool, async (client) => {
-    const { rows: [existing] } = await client.query("SELECT COUNT(*)::int AS count FROM films WHERE year=$1", [year]);
-    if (existing.count) throw new Error("Seed/import requires an empty year; existing films were left unchanged.");
+    const { rows: [existing] } = await client.query("SELECT COUNT(*)::int AS count FROM films WHERE year=ANY($1::int[])", [years]);
+    if (existing.count) throw new Error("Seed/import requires empty target years; existing films were left unchanged.");
     for (const film of films) {
       await client.query(`INSERT INTO films (id,title,position,watched,watched_at,created_at,updated_at,year)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [film.id, film.title, film.position, film.watched, film.watchedAt, film.createdAt, film.updatedAt, year]);
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [film.id, film.title, film.position, film.watched, film.watchedAt, film.createdAt, film.updatedAt, film.year ?? fallbackYear]);
     }
   });
 }

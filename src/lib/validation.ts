@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { yearSchema } from "./years.ts";
 
 export class FilmError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -22,7 +23,8 @@ export const filmSchema = z.object({
 export const watchlistImportSchema = z.object({ films: z.array(z.object({
   id: filmIdSchema, title: titleSchema, watched: z.boolean(), watchedAt: z.string().nullish(),
   updatedAt: z.string().optional(), createdAt: z.string().optional(),
-})).max(1000) });
+  year: yearSchema.optional(),
+})).max(100000) });
 
 function parse<T>(schema: z.ZodType<T>, input: unknown): T {
   const result = schema.safeParse(input);
