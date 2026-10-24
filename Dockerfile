@@ -4,6 +4,7 @@ FROM oven/bun:1.4.4-alpine@sha256:4cf82f5686b196504fe119db3fcd9185b191f82ece82c4
 FROM node:24-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS build
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /app
+ENV HUSKY=0
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 COPY vite.config.ts tsconfig.json eslint.config.js ./
