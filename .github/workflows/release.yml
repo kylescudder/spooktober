@@ -203,6 +203,6 @@ jobs:
           WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
-          HOST_TIMEOUT: "900"
-          READY_TIMEOUT: "180"
+          HOST_TIMEOUT: '900'
+          READY_TIMEOUT: '180'
         run: python3 -B deploy/await_release.py wait
