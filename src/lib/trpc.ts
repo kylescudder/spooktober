@@ -6,22 +6,22 @@ import type { AppRouter } from "../server/trpc";
 
 type Inputs = inferRouterInputs<AppRouter>["films"];
 export type SaveAction =
-  | { procedure: "add"; input: Inputs["add"] }
-  | { procedure: "setWatched"; input: Inputs["setWatched"] }
-  | { procedure: "reorder"; input: Inputs["reorder"] };
+  | { procedure: "add"; input: Omit<Inputs["add"], "year"> }
+  | { procedure: "setWatched"; input: Omit<Inputs["setWatched"], "year"> }
+  | { procedure: "reorder"; input: Omit<Inputs["reorder"], "year"> };
 
 const client = createTRPCClient<AppRouter>({ links: [httpBatchLink({
   url: "/api/trpc", headers: { "X-Spooktober-Request": "1" },
   fetch(url, options) { return fetch(url, { ...options, credentials: "same-origin", cache: "no-store" }); },
 })] });
 
-export async function sendRequest(action?: SaveAction) {
+export async function sendRequest(year: number, action?: SaveAction) {
   try {
-    if (!action) return await client.films.list.query();
+    if (!action) return await client.films.list.query({ year });
     switch (action.procedure) {
-      case "add": return await client.films.add.mutate(action.input);
-      case "setWatched": return await client.films.setWatched.mutate(action.input);
-      case "reorder": return await client.films.reorder.mutate(action.input);
+      case "add": return await client.films.add.mutate({ ...action.input, year });
+      case "setWatched": return await client.films.setWatched.mutate({ ...action.input, year });
+      case "reorder": return await client.films.reorder.mutate({ ...action.input, year });
     }
   } catch (error) {
     if (error instanceof TRPCClientError) {

@@ -51,20 +51,20 @@ test("readiness reports database health without revealing films", async ({ reque
 
 test("Clerk middleware redirects signed-out pages and denies film reads and writes", async ({ request }) => {
   for (const path of ["/", "/access-denied"]) {
-    const response = await request.get(`http://127.0.0.1:8082${path}`, { maxRedirects: 0 });
+    const response = await request.get(`http://127.0.0.1:${Number(process.env.E2E_PORT || 8080) + 2}${path}`, { maxRedirects: 0 });
     expect(response.status()).toBe(307);
     expect(response.headers().location).toBe("/sign-in");
     expect(response.headers()["cache-control"]).toBe("private, no-store");
   }
   for (const method of ["GET", "POST"]) {
-    const response = await request.fetch(`http://127.0.0.1:8082/api/trpc/films.${method === "GET" ? "list" : "add"}`, {
+    const response = await request.fetch(`http://127.0.0.1:${Number(process.env.E2E_PORT || 8080) + 2}/api/trpc/films.${method === "GET" ? "list" : "add"}`, {
       method, ...(method === "POST" ? { data: { title: "Should never be saved" } } : {}),
     });
     expect(response.status()).toBe(401);
     expect(response.headers()["cache-control"]).toBe("private, no-store");
     expect(await response.json()).toEqual({ error: "Please sign in to view the watchlist." });
   }
-  const health = await request.get("http://127.0.0.1:8082/healthz");
+  const health = await request.get(`http://127.0.0.1:${Number(process.env.E2E_PORT || 8080) + 2}/healthz`);
   expect(health.status()).toBe(503);
   expect(await health.text()).toBe("unavailable\n");
 });

@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 import { addFilmSchema, filmSchema, FilmError, orderSchema, setWatchedSchema } from "../lib/validation.ts";
 import { accessFailure } from "./auth.ts";
 import { addFilm, database, listFilms, markWatched, readyDatabase, reorderFilms } from "./database.ts";
+import { currentYear, seasonSchema } from "../lib/years.ts";
 
 // userId comes only from Clerk's verified server session, never request input.
 const t = initTRPC.context<{ userId: string | null }>().create({
@@ -34,10 +35,10 @@ async function storage<T>(work: () => Promise<T>): Promise<T> {
 
 export const appRouter = t.router({
   films: t.router({
-    list: authenticated.output(filmSchema.array()).query(() => storage(() => listFilms(database()))),
-    add: authenticated.input(addFilmSchema).output(filmSchema.array()).mutation(({ input }) => storage(() => addFilm(database(), input.id, input.title))),
-    setWatched: authenticated.input(setWatchedSchema).output(filmSchema.array()).mutation(({ input }) => storage(() => markWatched(database(), input.id, input.watched))),
-    reorder: authenticated.input(orderSchema).output(filmSchema.array()).mutation(({ input }) => storage(() => reorderFilms(database(), input.ids))),
+    list: authenticated.input(seasonSchema.default(() => ({ year: currentYear() }))).output(filmSchema.array()).query(({ input }) => storage(() => listFilms(database(), input.year))),
+    add: authenticated.input(addFilmSchema.extend(seasonSchema.shape)).output(filmSchema.array()).mutation(({ input }) => storage(() => addFilm(database(), input.id, input.title, input.year))),
+    setWatched: authenticated.input(setWatchedSchema.extend(seasonSchema.shape)).output(filmSchema.array()).mutation(({ input }) => storage(() => markWatched(database(), input.id, input.watched, input.year))),
+    reorder: authenticated.input(orderSchema.extend(seasonSchema.shape)).output(filmSchema.array()).mutation(({ input }) => storage(() => reorderFilms(database(), input.ids, input.year))),
   }),
 });
 

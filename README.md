@@ -4,6 +4,7 @@ Kyle and Rhiann's shared Halloween film watchlist. **TanStack Start + TanStack R
 
 - Cosy pumpkin-and-candle styling, with phone and keyboard controls.
 - The current film list is rendered on the server; React handles dragging, checkboxes and adding films.
+- The year picker defaults to the current calendar year. Each year's films, order and progress are separate; `?year=2026` links to a specific season and survives reloads. The picker includes 2020 through next year (and any year opened directly).
 - Clerk provides sign-in; only Kyle and Rhiann's configured user IDs can read or change films.
 - tRPC shares API input/output types with the client; Zod validates requests, responses and JSON imports.
 - PostgreSQL saves synchronize through a refresh every 15 seconds and when a page regains focus.
@@ -49,7 +50,9 @@ docker compose -f compose.dev.yaml run --rm spooktober node database.cjs seed
 docker compose -f compose.dev.yaml up -d spooktober
 ```
 
-Open <http://localhost:8080>. Seed once for a fresh list, or use `node database.cjs import -` with an exported JSON list instead. Seed/import refuse to replace populated data. Normal startup applies neither migrations nor seed data. `docker compose -f compose.dev.yaml down` retains the development database volume.
+Open <http://localhost:8080>. Seed once for a fresh list, or use `node database.cjs import -` with an exported JSON list instead. Seed/import refuse to replace a populated year. Normal startup applies neither migrations nor seed data. `docker compose -f compose.dev.yaml down` retains the development database volume.
+
+Migration `002_annual_watchlists.sql` assigns the original shared list to **2026**, preserving its order, watched status and timestamps. Run `db migrate` as the schema owner before starting this version. Other seasons start empty. Maintenance `seed`, `import` and `export` commands default to the current year; supply `--year 2026` for another season, for example `bun run db export /tmp/spooktober-2026.json --year 2026`. JSON exports contain one season, so retain the year in the filename and supply it when restoring. Film IDs remain globally unique; imports refuse reused IDs. Explicit seeding in another year generates fresh IDs.
 
 ## Develop with Bun
 
@@ -78,6 +81,8 @@ bunx --no-install playwright install chromium
 bun run test:e2e
 ```
 
+To include authenticated watchlist UI coverage against real PostgreSQL, set `E2E_WATCHLIST_DATABASE_URL` to a disposable control database ending in `_test` when running `bun run test:e2e`. The test-only Vite host creates its own database and mounts the production watchlist route, with Clerk replaced at the existing trusted-session seam and the server loader replaced by an API read. Tests exercise the real tRPC transport, validation and storage, covering the current-year default (including a new calendar year), year URLs/reloads/history, independent lists/progress/order, and failed-save retry at desktop/mobile sizes. This fixture is absent from production builds and does not verify real Clerk login or server rendering of an authenticated season.
+
 Integration tests require a disposable PostgreSQL cluster with a privileged test login. They create uniquely named databases; the control database must end in `_test`. With the local development cluster:
 
 ```sh
@@ -95,7 +100,7 @@ Production runs on the host (ARM macOS with Colima), using the shared PostgreSQL
 
 One TanStack Start container joins the platform's existing web/database networks and publishes no host port. The image uses Nitro’s standalone Node.js output, with a 256 MiB container limit and a four-connection database pool. Pushes to `main` are checked, published to GHCR and deployed to the host by GitHub Actions; see [CI and releases](deploy/README.md#continuous-integration-and-releases).
 
-The PostgreSQL schema is unchanged by this framework migration. Existing PostgreSQL data can be used directly. For the old hosted watchlist, refresh the private JSON export before cutover and import it into an empty migrated database.
+Run all pending PostgreSQL migrations before starting the application. For the old hosted watchlist, refresh the private JSON export before cutover and import it into an empty season with `--year 2026`.
 
 ## Artwork
 

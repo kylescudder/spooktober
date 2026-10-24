@@ -4,6 +4,7 @@ import { join } from "node:path";
 import pg, { type Pool, type PoolClient, type PoolConfig } from "pg";
 import type { Film } from "../lib/films.ts";
 import { FilmError, completeOrder } from "../lib/validation.ts";
+import { currentYear } from "../lib/years.ts";
 
 // The same database-scoped transaction lock as the previous PostgreSQL release.
 const watchlistLock = "6003385505269698370";
@@ -105,55 +106,55 @@ export async function grantRuntimeAccess(pool: Pool, role: string) {
   });
 }
 
-export async function listFilms(db: Queryable): Promise<Film[]> {
+export async function listFilms(db: Queryable, year = currentYear()): Promise<Film[]> {
   const { rows } = await db.query<Film>(`SELECT id,title,position,watched,watched_at AS "watchedAt",
-    updated_at AS "updatedAt",created_at AS "createdAt" FROM films ORDER BY position,id`);
+    updated_at AS "updatedAt",created_at AS "createdAt" FROM films WHERE year=$1 ORDER BY position,id`, [year]);
   return rows;
 }
 
-async function changeFilms(pool: Pool, change: (client: PoolClient) => Promise<void>): Promise<Film[]> {
-  return transaction(pool, async (client) => { await change(client); return listFilms(client); });
+async function changeFilms(pool: Pool, year: number, change: (client: PoolClient) => Promise<void>): Promise<Film[]> {
+  return transaction(pool, async (client) => { await change(client); return listFilms(client, year); });
 }
 
-export async function addFilm(pool: Pool, id: string, title: string) {
-  return changeFilms(pool, async (client) => {
-    const { rows: [existing] } = await client.query("SELECT title FROM films WHERE id=$1", [id]);
+export async function addFilm(pool: Pool, id: string, title: string, year = currentYear()) {
+  return changeFilms(pool, year, async (client) => {
+    const { rows: [existing] } = await client.query("SELECT title,year FROM films WHERE id=$1", [id]);
     if (existing) {
-      if (existing.title !== title) throw new FilmError("This film identifier has already been used. Please refresh.", 409);
+      if (existing.title !== title || existing.year !== year) throw new FilmError("This film identifier has already been used. Please refresh.", 409);
       return;
     }
     const now = new Date().toISOString();
-    await client.query(`INSERT INTO films (id,title,position,watched,created_at,updated_at)
-      SELECT $1,$2,COALESCE(MAX(position)+1,0),false,$3,$3 FROM films`, [id, title, now]);
+    await client.query(`INSERT INTO films (id,title,position,watched,created_at,updated_at,year)
+      SELECT $1,$2,COALESCE(MAX(position)+1,0),false,$3,$3,$4 FROM films WHERE year=$4`, [id, title, now, year]);
   });
 }
 
-export async function markWatched(pool: Pool, id: string, watched: boolean) {
-  return changeFilms(pool, async (client) => {
+export async function markWatched(pool: Pool, id: string, watched: boolean, year = currentYear()) {
+  return changeFilms(pool, year, async (client) => {
     const { rowCount } = await client.query(`UPDATE films SET watched_at=CASE
       WHEN NOT $1 THEN NULL WHEN NOT watched THEN $2 ELSE watched_at END,
-      watched=$1,updated_at=$2 WHERE id=$3`, [watched, new Date().toISOString(), id]);
+      watched=$1,updated_at=$2 WHERE id=$3 AND year=$4`, [watched, new Date().toISOString(), id, year]);
     if (!rowCount) throw new FilmError("That film is no longer on the list. Please refresh.", 404);
   });
 }
 
-export async function reorderFilms(pool: Pool, requested: string[]) {
-  return changeFilms(pool, async (client) => {
-    const films = await listFilms(client);
+export async function reorderFilms(pool: Pool, requested: string[], year = currentYear()) {
+  return changeFilms(pool, year, async (client) => {
+    const films = await listFilms(client, year);
     const ids = completeOrder(requested, films.map((film) => film.id));
     const now = new Date().toISOString();
-    for (const [position, id] of ids.entries()) await client.query("UPDATE films SET position=$1,updated_at=$2 WHERE id=$3", [position, now, id]);
+    for (const [position, id] of ids.entries()) await client.query("UPDATE films SET position=$1,updated_at=$2 WHERE id=$3 AND year=$4", [position, now, id, year]);
   });
 }
 
-export async function importFilms(pool: Pool, films: Film[]) {
+export async function importFilms(pool: Pool, films: Film[], year = currentYear()) {
   await readyDatabase(pool);
   await transaction(pool, async (client) => {
-    const { rows: [existing] } = await client.query("SELECT COUNT(*)::int AS count FROM films");
-    if (existing.count) throw new Error("Seed/import requires an empty database; existing films were left unchanged.");
+    const { rows: [existing] } = await client.query("SELECT COUNT(*)::int AS count FROM films WHERE year=$1", [year]);
+    if (existing.count) throw new Error("Seed/import requires an empty year; existing films were left unchanged.");
     for (const film of films) {
-      await client.query(`INSERT INTO films (id,title,position,watched,watched_at,created_at,updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7)`, [film.id, film.title, film.position, film.watched, film.watchedAt, film.createdAt, film.updatedAt]);
+      await client.query(`INSERT INTO films (id,title,position,watched,watched_at,created_at,updated_at,year)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [film.id, film.title, film.position, film.watched, film.watchedAt, film.createdAt, film.updatedAt, year]);
     }
   });
 }
