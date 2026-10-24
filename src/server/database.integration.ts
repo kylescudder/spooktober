@@ -16,7 +16,7 @@ import {
   readyDatabase,
   reorderFilms
 } from './database.ts'
-import { parseWatchlist } from './watchlist.ts'
+import { normalizeTimestamp, parseWatchlist } from './watchlist.ts'
 import { createTrpcHandler } from './trpc-handler.ts'
 import type { AppRouter } from './trpc.ts'
 
@@ -67,7 +67,14 @@ test('deployment CLI exports and restores every season when the current year is 
     })
   )
   await importFilms(pool, films, 2020)
+  // Reproduce timestamps whose millisecond representation ends in zero.
+  const timestamp = t.mock.method(
+    Date.prototype,
+    'toISOString',
+    () => '2021-10-01T12:00:00.900Z'
+  )
   await addFilm(pool, randomUUID(), 'Alien', 2021)
+  timestamp.mock.restore()
   assert.deepEqual(await listFilms(pool), [])
   const cli = (databaseURL: URL, args: string[], input?: string) =>
     new Promise<string>((resolve, reject) => {
@@ -100,7 +107,14 @@ test('deployment CLI exports and restores every season when the current year is 
   for (const year of [2020, 2021])
     assert.deepEqual(
       await listFilms(restored, year),
-      await listFilms(pool, year)
+      // Imports canonicalize equivalent timestamp spellings without losing precision.
+      (await listFilms(pool, year)).map((film) => ({
+        ...film,
+        createdAt: normalizeTimestamp(film.createdAt),
+        updatedAt: normalizeTimestamp(film.updatedAt),
+        watchedAt:
+          film.watchedAt === null ? null : normalizeTimestamp(film.watchedAt)
+      }))
     )
   assert.deepEqual(await listFilms(restored), [])
   await assert.rejects(cli(restoredURL, ['import', '-'], snapshot))
