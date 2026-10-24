@@ -43,9 +43,9 @@ test("every tRPC procedure independently rejects signed-out and uninvited sessio
     const code = userId ? "FORBIDDEN" : "UNAUTHORIZED";
     for (const call of [
       () => caller.films.list(),
-      () => caller.films.add({ id: "00000000-0000-4000-8000-000000000001", title: "The Thing" }),
-      () => caller.films.setWatched({ id: "film-01", watched: true }),
-      () => caller.films.reorder({ ids: ["film-01"] }),
+      () => caller.films.add({ id: "00000000-0000-4000-8000-000000000001", title: "The Thing", year: 2026 }),
+      () => caller.films.setWatched({ id: "film-01", watched: true, year: 2026 }),
+      () => caller.films.reorder({ ids: ["film-01"], year: 2026 }),
     ]) await assert.rejects(call, { code });
   }
   delete process.env.CLERK_ALLOWED_USER_IDS;

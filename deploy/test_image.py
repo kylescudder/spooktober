@@ -104,7 +104,7 @@ class RuntimeImage(unittest.TestCase):
         run_command(grant)
 
         for statement in ("SELECT count(*) FROM public.films", "SELECT max(version) FROM public.schema_migrations",
-                          "INSERT INTO films (id,title,position,created_at,updated_at) VALUES ('t1','Halloween',0,'now','now')",
+                          "INSERT INTO films (id,title,position,created_at,updated_at,year) VALUES ('t1','Halloween',0,'now','now',2026)",
                           "UPDATE films SET watched=true, watched_at='now' WHERE id='t1'"):
             result = self.runtime_sql(statement)
             self.assertEqual(result.returncode, 0, f'{statement}: {result.stderr}')
@@ -119,9 +119,17 @@ class RuntimeImage(unittest.TestCase):
         run_command(self.commands()[0])
         run_command(self.commands()[1])
         url = f'postgres://{RUNTIME}:{self.runtime_password}@postgres:5432/{DATABASE}?sslmode=disable'
+        result = self.runtime_sql("""INSERT INTO films (id,title,position,created_at,updated_at,year)
+          VALUES ('backup-1900','Halloween',0,'1900-10-31T23:00:00.123456789Z','1900-10-31T23:00:00.123456789Z',1900),
+                 ('backup-1901','Alien',0,'1901-10-31T23:00:00Z','1901-10-31T23:00:00Z',1901)""")
+        self.assertEqual(result.returncode, 0, result.stderr)
         result = docker('run', '--rm', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
                         '--network', self.network, '-e', f'DATABASE_URL={url}', IMAGE, 'node', 'database.cjs', 'export', '-')
-        self.assertIsInstance(json.loads(result.stdout)['films'], list)
+        films = json.loads(result.stdout)['films']
+        historical = [film for film in films if film['id'].startswith('backup-')]
+        self.assertEqual([(film['id'], film['year'], film['position']) for film in historical],
+                         [('backup-1900', 1900, 0), ('backup-1901', 1901, 0)])
+        self.assertEqual(historical[0]['updatedAt'], '1900-10-31T23:00:00.123456789Z')
 
     def test_a_grant_that_the_login_cannot_make_is_not_reported_as_success(self):
         run_command(self.commands()[0])

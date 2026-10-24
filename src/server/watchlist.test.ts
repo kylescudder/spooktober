@@ -18,7 +18,7 @@ test("imports preserve IDs, array order, unknown watched dates and timestamp nan
   assert.equal(normalizeTimestamp("2026-10-05T00:00:00.120000000Z"), "2026-10-05T00:00:00.12Z");
   for (const date of ["2026-02-30T00:00:00Z", "2026-10-05T24:00:00Z", "2026-10-05T00:00:00.1234567890Z", "2026-10-05"]) assert.throws(() => normalizeTimestamp(date));
   for (const films of [[film, film], [{ ...film, watched: false, watchedAt: film.updatedAt }], [{ ...film, title: "bad\0title" }], [{ ...film, watched: "true" }]]) assert.throws(() => parseWatchlist(JSON.stringify({ films })));
-  assert.throws(() => parseWatchlist("x".repeat(1024 * 1024 + 1)));
+  assert.throws(() => parseWatchlist("x".repeat(16 * 1024 * 1024 + 1)), /exceeds 16 MiB/);
 });
 
 test("portable exports are private files and restore without data loss", async () => {
@@ -30,6 +30,24 @@ test("portable exports are private files and restore without data loss", async (
     assert.equal((await stat(path)).mode & 0o777, 0o600);
     assert.deepEqual(parseWatchlist(await readFile(path)), films);
   } finally { await rm(directory, { recursive: true }); }
+});
+
+test("annual snapshots retain year tags and assign viewing positions within each season", () => {
+  const films = parseWatchlist(JSON.stringify({ films: [
+    { ...film, id: "2020-first", year: 2020 },
+    { ...film, id: "2021-first", year: 2021 },
+    { ...film, id: "2020-second", year: 2020 },
+  ] }));
+  assert.deepEqual(films.map(({ id, year, position }) => [id, year, position]), [
+    ["2020-first", 2020, 0], ["2021-first", 2021, 0], ["2020-second", 2020, 1],
+  ]);
+  for (const input of [
+    [{ ...film, year: 2020 }, { ...film, id: "untagged" }],
+    [{ ...film, year: "2020" }], [{ ...film, year: 2020.5 }], [{ ...film, year: 10000 }],
+  ]) assert.throws(() => parseWatchlist(JSON.stringify({ films: input })));
+  const many = Array.from({ length: 1200 }, (_, i) => ({ ...film, id: `film-${i}`, year: i < 600 ? 2020 : 2021 }));
+  assert.equal(parseWatchlist(JSON.stringify({ films: many })).length, 1200);
+  assert.throws(() => parseWatchlist(JSON.stringify({ films: many.map((item) => ({ ...item, year: 2020 })) })), /1000 films in one year/);
 });
 
 test("database URLs require PostgreSQL and a named database without echoing secrets", () => {

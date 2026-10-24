@@ -53,6 +53,13 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .intro { position: relative; min-height: 205px; display: flex; align-items: center; gap: 20px; }
 .intro-copy { padding: 24px 0; position: relative; z-index: 1; }
 .eyebrow { margin: 0 0 8px; color: #c4a682; text-transform: uppercase; letter-spacing: .15em; font-size: .75rem; font-weight: 600; }
+.season-picker { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 8px; }
+.season-picker .eyebrow { margin: 0; }
+.year-select { position: relative; display: inline-flex; align-items: center; }
+.year-select select { appearance: none; color: #f0d9b9; background: #30281e; border: 1px solid #735234; border-radius: 5px; padding: 6px 27px 6px 10px; min-height: 36px; font: inherit; font-size: .875rem; font-variant-numeric: tabular-nums; cursor: pointer; }
+.year-select select:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.year-select select:disabled { opacity: .6; cursor: wait; }
+.year-select svg { position: absolute; right: 8px; color: #efb784; pointer-events: none; }
 h1 { font-family: Georgia, "Times New Roman", serif; font-weight: 400; font-size: clamp(3.1rem, 7vw, 4.8rem); letter-spacing: -.06em; line-height: 1.07; margin: 0; color: #f0d9b9; }
 h1 span { color: var(--primary); }
 .intro-description { margin: 13px 0 0; color: var(--muted-foreground); font-size: .9375rem; }

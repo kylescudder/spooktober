@@ -1,11 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { UserButton } from "@clerk/tanstack-react-start";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Clapperboard, GripVertical, Plus, Check, Moon, Heart, LoaderCircle, RefreshCw, AlertCircle } from "lucide-react";
+import { Clapperboard, GripVertical, Plus, Check, Moon, Heart, LoaderCircle, RefreshCw, AlertCircle, ChevronDown } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -16,6 +15,7 @@ import { type Film } from "@/lib/films";
 import { parseTitle, parseWatched, parseOrder, completeOrder } from "@/lib/validation";
 
 import { sendRequest, type SaveAction } from "@/lib/trpc";
+import { pickerYears } from "@/lib/years";
 type OptimisticChange = (films: Film[]) => Film[];
 type WebTool = { name: string; title: string; description: string; inputSchema: object; annotations: { readOnlyHint: boolean; untrustedContentHint: boolean }; execute: (input: unknown) => unknown | Promise<unknown> };
 type ModelContext = { registerTool: (tool: WebTool, options: { signal: AbortSignal }) => void | Promise<void> };
@@ -34,7 +34,9 @@ function FilmRow({ film, index, next, disabled, onWatched }: { film: Film; index
   );
 }
 
-export function FilmList({ initialFilms }: { initialFilms: Film[] | null }) {
+export function FilmList({ initialFilms, year, onYearChange, account }: {
+  initialFilms: Film[] | null; year: number; onYearChange: (year: number) => void; account?: ReactNode;
+}) {
   const [films, setFilms] = useState<Film[]>(initialFilms ?? []);
   const [loaded, setLoaded] = useState(initialFilms !== null);
   const [saving, setSaving] = useState(false);
@@ -58,14 +60,14 @@ export function FilmList({ initialFilms }: { initialFilms: Film[] | null }) {
     if (busyRef.current || draggingRef.current || (retryRef.current && !manual)) return;
     const serial = ++requestSerial.current;
     try {
-      const next = await sendRequest();
+      const next = await sendRequest(year);
       if (serial !== requestSerial.current || busyRef.current || draggingRef.current) return;
       applyFilms(next); setLoaded(true);
       if (!retryRef.current) setError(null);
     } catch (failure) {
       if (serial === requestSerial.current && !busyRef.current) setError(failure instanceof Error ? failure.message : "Couldn’t load the watchlist. Please try again.");
     }
-  }, [applyFilms]);
+  }, [applyFilms, year]);
 
   const save = useCallback(async (action: SaveAction, optimistic?: OptimisticChange): Promise<boolean> => {
     if (busyRef.current) return false;
@@ -75,7 +77,7 @@ export function FilmList({ initialFilms }: { initialFilms: Film[] | null }) {
     setSaving(true); setError(null); setRetry(null); retryRef.current = false;
     if (optimistic) applyFilms(optimistic(previous));
     try {
-      applyFilms(await sendRequest(action));
+      applyFilms(await sendRequest(year, action));
       setLoaded(true);
       return true;
     } catch (failure) {
@@ -84,7 +86,7 @@ export function FilmList({ initialFilms }: { initialFilms: Film[] | null }) {
       setRetry({ action, optimistic }); retryRef.current = true;
       return false;
     } finally { busyRef.current = false; setSaving(false); }
-  }, [applyFilms]);
+  }, [applyFilms, year]);
 
   const markWatched = useCallback((film: Film, watched: boolean) => save({ procedure: "setWatched", input: { id: film.id, watched } }, (current) => current.map((item) => item.id === film.id ? { ...item, watched } : item)), [save]);
 
@@ -155,11 +157,19 @@ export function FilmList({ initialFilms }: { initialFilms: Film[] | null }) {
     <main className="watchlist-page">
       <header className="masthead">
         <span className="our-names"><Clapperboard size={17} /> Kyle & Rhiann</span>
-        <div className="masthead-account"><span className="season"><Moon size={14} /> Halloween film nights</span><UserButton /></div>
+        <div className="masthead-account"><span className="season"><Moon size={14} /> Halloween film nights</span>{account}</div>
       </header>
       <section className="intro" aria-labelledby="page-title">
         <div className="intro-copy">
-          <p className="eyebrow">The October watchlist</p>
+          <div className="season-picker">
+            <label className="eyebrow" htmlFor="watchlist-year">The October watchlist</label>
+            <span className="year-select">
+              <select id="watchlist-year" aria-label="Watchlist year" value={year} disabled={!hydrated || saving || dragging} onChange={(event) => onYearChange(Number(event.target.value))}>
+                {pickerYears(year).map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
+              <ChevronDown size={13} aria-hidden="true" />
+            </span>
+          </div>
           <h1 id="page-title">Spooktober<span>.</span></h1>
           <p className="intro-description">Kyle & Rhiann’s Halloween film nights.</p>
         </div>
@@ -172,7 +182,7 @@ export function FilmList({ initialFilms }: { initialFilms: Film[] | null }) {
       {error && <div className="save-error" role="alert"><AlertCircle size={18} /><span>{error}</span><Button variant="ghost" disabled={saving} onClick={() => retry ? void save(retry.action, retry.optimistic).then((ok) => { if (ok && retry.action.procedure === "add") { setTitle(""); setAddOpen(false); } }) : void refresh(true)}><RefreshCw size={14} /> Retry</Button></div>}
       <section className="lineup" aria-labelledby="lineup-title" aria-busy={saving}>
         <div className="lineup-toolbar">
-          <div><h2 id="lineup-title">Our line-up <span>{films.length}</span></h2><p>Drag to reorder. Tick when the credits roll.</p></div>
+          <div><h2 id="lineup-title">Our {year} line-up <span>{films.length}</span></h2><p>Drag to reorder. Tick when the credits roll.</p></div>
           <Button className="add-button" disabled={disabled || dragging} onClick={() => { setTitleError(null); setAddOpen(true); }}><Plus size={17} /> Add film</Button>
         </div>
         {!loaded ? <div className="list-loading" aria-label="Loading our films"><Skeleton className="h-6 w-3/4" /><Skeleton className="h-6 w-1/2" /><Skeleton className="h-6 w-2/3" /><p>Loading our films…</p></div> : films.length === 0 ? <div className="empty-list"><Clapperboard size={28} /><p>Our first fright is waiting.</p><Button onClick={() => setAddOpen(true)}><Plus size={16} /> Add our first film</Button></div> : <DndContext id="spooktober-films" sensors={sensors} collisionDetection={closestCenter} onDragStart={() => { draggingRef.current = true; setDragging(true); ++requestSerial.current; }} onDragCancel={() => { draggingRef.current = false; setDragging(false); }} onDragEnd={(event) => { void finishDrag(event); }}>
