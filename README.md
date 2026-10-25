@@ -57,7 +57,7 @@ The original shared list belongs to **2026**, preserving its order, watched stat
 
 ## Develop with Bun
 
-Use Bun 1.4.2 for package management and Node.js 22.13 or newer for the app and test runtime. Start only the local PostgreSQL service above, run `bun install --frozen-lockfile`, and set the following development connection in your private `.env`, alongside your Clerk settings:
+Use Bun 1.4.4 for package management, tests and the `bun run db` commands, and Node.js 22.13 or newer for the app runtime. Start only the local PostgreSQL service above, run `bun install --frozen-lockfile`, and set the following development connection in your private `.env`, alongside your Clerk settings:
 
 ```dotenv
 DATABASE_URL=postgres://spooktober_owner:local-development-only@127.0.0.1:54329/spooktober?sslmode=disable
