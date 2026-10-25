@@ -39,7 +39,7 @@ export default defineConfig({
           throw new Error('Use a disposable control database ending in _test.')
         const control = createDatabase(connection)
         const name = `spooktober_browser_${randomUUID().replaceAll('-', '')}`
-        await control.query(`CREATE DATABASE "${name}"`)
+        await control.$client.unsafe(`CREATE DATABASE "${name}"`)
         const url = new URL(connection)
         url.pathname = `/${name}`
         process.env.DATABASE_URL = url.href
@@ -47,7 +47,7 @@ export default defineConfig({
         process.env.PUBLIC_URL = ''
         const pool = createDatabase(url.href)
         await migrateDatabase(pool)
-        await pool.end()
+        await pool.$client.end()
         // The existing trusted-session seam replaces Clerk only in this test
         // server. Requests use the real tRPC router, validation and PostgreSQL.
         const handler = createTrpcHandler(async () => 'user_Kyle')
@@ -77,8 +77,8 @@ export default defineConfig({
           }
           await globals.spooktoberDatabase?.end()
           delete globals.spooktoberDatabase
-          await control.query(`DROP DATABASE "${name}" WITH (FORCE)`)
-          await control.end()
+          await control.$client.unsafe(`DROP DATABASE "${name}" WITH (FORCE)`)
+          await control.$client.end()
         })
       }
     },

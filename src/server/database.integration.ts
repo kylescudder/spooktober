@@ -4,16 +4,15 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { createTRPCClient, httpBatchLink } from '@trpc/client'
-import type { Pool } from 'pg'
 import {
   addFilm,
   createDatabase,
+  type Database,
   grantRuntimeAccess,
   importFilms,
   listFilms,
   markWatched,
   migrateDatabase,
-  readyDatabase,
   reorderFilms
 } from './database.ts'
 import { normalizeTimestamp, parseWatchlist } from './watchlist.ts'
@@ -28,16 +27,16 @@ async function testDatabase(t: TestContext) {
     )
   const control = createDatabase(value)
   const name = `spooktober_test_${randomUUID().replaceAll('-', '')}`
-  await control.query(`CREATE DATABASE "${name}"`)
+  await control.$client.unsafe(`CREATE DATABASE "${name}"`)
   const url = new URL(value)
   url.pathname = `/${name}`
   const pool = createDatabase(url.href)
   const cleanup: Array<() => Promise<void>> = []
   t.after(async () => {
     for (const close of cleanup.reverse()) await close()
-    await pool.end()
-    await control.query(`DROP DATABASE "${name}" WITH (FORCE)`)
-    await control.end()
+    await pool.$client.end()
+    await control.$client.unsafe(`DROP DATABASE "${name}" WITH (FORCE)`)
+    await control.$client.end()
   })
   return { pool, url, control, cleanup }
 }
@@ -182,34 +181,45 @@ test('annual lists keep additions, watched progress and order separate', async (
   assert.deepEqual(await listFilms(pool, 2027), nextYear)
 })
 
-test('migrations are explicit, repeatable and reject incompatible history', async (t) => {
+test('migrations are repeatable and record one baseline', async (t) => {
   const { pool } = await testDatabase(t)
-  await assert.rejects(readyDatabase(pool))
   await migrateDatabase(pool)
   await migrateDatabase(pool)
-  await readyDatabase(pool)
   assert.deepEqual(await listFilms(pool), [])
-  await pool.query('INSERT INTO schema_migrations (version) VALUES (999)')
-  await assert.rejects(readyDatabase(pool))
-  await assert.rejects(migrateDatabase(pool))
+  const [journal] = await pool.$client`
+    SELECT count(*)::int AS applied FROM drizzle.__drizzle_migrations`
+  assert.equal(journal!.applied, 1)
 })
 
-test('the annual migration preserves the original list in 2026 when applied later', async (t) => {
+test('the baseline adopts a database from the pre-Drizzle migrations', async (t) => {
   const { pool } = await testDatabase(t)
-  await pool.query(await readFile('src/migrations/001_films.sql', 'utf8'))
-  await pool.query(
-    'CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY); INSERT INTO schema_migrations VALUES (1)'
+  await pool.$client.unsafe(
+    await readFile('src/server/fixtures/legacy-schema.sql', 'utf8')
   )
-  await pool.query(`INSERT INTO films (id,title,position,watched,watched_at,created_at,updated_at)
-    VALUES ('legacy', 'Halloween', 0, true, '2026-10-31T23:00:00Z', '2026-10-01T12:00:00Z', '2026-10-31T23:00:00Z')`)
+  await pool.$client`INSERT INTO films (id,title,position,watched,watched_at,created_at,updated_at,year)
+    VALUES ('legacy', 'Halloween', 0, true, '2026-10-31T23:00:00.123456789Z', '2026-10-01T12:00:00Z', '2026-10-31T23:00:00Z', 2026)`
+  const before = await listFilms(pool, 2026)
   await migrateDatabase(pool)
   await migrateDatabase(pool)
-  const films = await listFilms(pool, 2026)
-  assert.equal(films.length, 1)
-  assert.equal(films[0].title, 'Halloween')
-  assert.equal(films[0].watched, true)
-  assert.equal(films[0].watchedAt, '2026-10-31T23:00:00Z')
-  assert.deepEqual(await listFilms(pool, 2027), [])
+  assert.deepEqual(await listFilms(pool, 2026), before)
+  assert.equal(before[0]!.watchedAt, '2026-10-31T23:00:00.123456789Z')
+  // The previous release still reads its history after a rollback.
+  const [history] = await pool.$client`
+    SELECT max(version)::int AS version FROM schema_migrations`
+  assert.equal(history!.version, 2)
+  // Constraints, including the deferrable unique position, behave as before.
+  await reorderFilms(pool, ['legacy'], 2026)
+  await assert.rejects(
+    pool.$client`INSERT INTO films (id,title,position,created_at,updated_at,year)
+      VALUES ('dup', 'Alien', 0, 'now', 'now', 2026)`
+  )
+})
+
+test('the baseline refuses a database that predates annual watchlists', async (t) => {
+  const { pool } = await testDatabase(t)
+  const legacy = await readFile('src/server/fixtures/legacy-schema.sql', 'utf8')
+  await pool.$client.unsafe(legacy.slice(0, legacy.indexOf('-- The original')))
+  await assert.rejects(migrateDatabase(pool), /predates annual watchlists/)
 })
 
 test('watched dates, idempotent adds and stale reorders preserve the list', async (t) => {
@@ -247,7 +257,7 @@ test('independent connection pools retain all simultaneous adds, ticks and reord
   await migrateDatabase(pool)
   await importFilms(pool, await seed())
   const other = createDatabase(url.href)
-  cleanup.push(() => other.end())
+  cleanup.push(() => other.$client.end())
   const pools = [pool, other]
   await Promise.all(
     Array.from({ length: 12 }, async (_, i) => {
@@ -307,7 +317,7 @@ test('tRPC transport validates inputs, requires auth and rejects unsafe requests
   await migrateDatabase(pool)
   await importFilms(pool, await seed())
   const globals = globalThis as typeof globalThis & {
-    spooktoberDatabase?: Pool
+    spooktoberDatabase?: Database
   }
   const previous = { ...process.env }
   process.env.DATABASE_URL = url.href
@@ -460,29 +470,30 @@ test('a restricted runtime role can save films but cannot create schema or alter
   await migrateDatabase(pool)
   await importFilms(pool, await seed())
   const role = `spooktober_role_${randomUUID().replaceAll('-', '')}`
-  await control.query(
+  await control.$client.unsafe(
     `CREATE ROLE "${role}" LOGIN PASSWORD 'local-runtime-only'`
   )
-  await pool.query('REVOKE CREATE ON SCHEMA public FROM PUBLIC')
+  await pool.$client.unsafe('REVOKE CREATE ON SCHEMA public FROM PUBLIC')
   await grantRuntimeAccess(pool, role)
   await grantRuntimeAccess(pool, role)
   url.username = role
   url.password = 'local-runtime-only'
   const runtime = createDatabase(url.href)
   cleanup.push(async () => {
-    await runtime.end()
-    await pool.query(`DROP OWNED BY "${role}"`)
-    await control.query(`DROP ROLE "${role}"`)
+    await runtime.$client.end()
+    await pool.$client.unsafe(`DROP OWNED BY "${role}"`)
+    await control.$client.unsafe(`DROP ROLE "${role}"`)
   })
-  await readyDatabase(runtime)
   const id = randomUUID()
   await addFilm(runtime, id, 'Runtime film')
   await markWatched(runtime, id, true)
   await reorderFilms(runtime, [id])
-  await assert.rejects(runtime.query('CREATE TABLE forbidden (id integer)'))
-  await assert.rejects(runtime.query('DELETE FROM films'))
   await assert.rejects(
-    runtime.query('INSERT INTO schema_migrations (version) VALUES (999)')
+    runtime.$client.unsafe('CREATE TABLE forbidden (id integer)')
+  )
+  await assert.rejects(runtime.$client.unsafe('DELETE FROM films'))
+  await assert.rejects(
+    runtime.$client.unsafe('SELECT hash FROM drizzle.__drizzle_migrations')
   )
   await assert.rejects(migrateDatabase(runtime))
 })
@@ -494,5 +505,4 @@ test('runtime grants reject unsafe role names and unmigrated databases', async (
   for (const role of ['x"; DROP TABLE films; --', 'Mixed', '', 'a'.repeat(64)])
     await assert.rejects(grantRuntimeAccess(pool, role), /role name/)
   await assert.rejects(grantRuntimeAccess(pool, 'spooktober_missing_role'))
-  await readyDatabase(pool)
 })

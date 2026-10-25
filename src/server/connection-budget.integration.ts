@@ -2,26 +2,24 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 import { createDeploymentDatabase } from './deployment-database.ts'
-import pg from 'pg'
+import postgres from 'postgres'
 function connect(url: string, max: number) {
-  return adapt(
-    new pg.Pool({ connectionString: url, max, connectionTimeoutMillis: 3000 })
-  )
+  return adapt(postgres(url, { max, connect_timeout: 3, onnotice: () => {} }))
 }
-function adapt(pool: pg.Pool): Client {
+function adapt(pool: postgres.Sql): Client {
   return {
-    query: async (text) => (await pool.query(text)).rows,
+    query: async (text) => pool.unsafe(text),
     reserve: async () => {
-      const connection = await pool.connect()
+      const connection = await pool.reserve()
       return {
-        query: async (text) => (await connection.query(text)).rows,
+        query: async (text) => connection.unsafe(text),
         release: async () => {
           connection.release()
         }
       }
     },
     close: async () => {
-      await pool.end()
+      await pool.end({ timeout: 1 })
     }
   }
 }
@@ -62,7 +60,7 @@ async function checkBudget() {
     url.username = role
     url.password = ''
     const app = connect(url.toString(), 4)
-    const deployment = adapt(createDeploymentDatabase(url.toString()))
+    const deployment = adapt(createDeploymentDatabase(url.toString()).$client)
     const health = connect(url.toString(), 1)
     const spare = connect(url.toString(), 2)
     const overflow = connect(url.toString(), 1)

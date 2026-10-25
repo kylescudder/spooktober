@@ -103,17 +103,46 @@ class RuntimeImage(unittest.TestCase):
         run_command(migrate)
         run_command(grant)
 
-        for statement in ("SELECT count(*) FROM public.films", "SELECT max(version) FROM public.schema_migrations",
+        for statement in ("SELECT count(*) FROM public.films",
                           "INSERT INTO films (id,title,position,created_at,updated_at,year) VALUES ('t1','Halloween',0,'now','now',2026)",
                           "UPDATE films SET watched=true, watched_at='now' WHERE id='t1'"):
             result = self.runtime_sql(statement)
             self.assertEqual(result.returncode, 0, f'{statement}: {result.stderr}')
-        for statement in ("DELETE FROM films", "INSERT INTO schema_migrations (version) VALUES (2)",
-                          "UPDATE schema_migrations SET version=9", "DELETE FROM schema_migrations",
-                          "CREATE TABLE forbidden (id integer)"):
+        for statement in ("DELETE FROM films", "SELECT hash FROM drizzle.__drizzle_migrations",
+                          "DELETE FROM drizzle.__drizzle_migrations", "CREATE TABLE forbidden (id integer)"):
             result = self.runtime_sql(statement)
             self.assertNotEqual(result.returncode, 0, f'runtime role must not run: {statement}')
             self.assertIn('permission denied', result.stderr)
+
+    def test_production_commands_adopt_a_database_from_the_previous_release(self):
+        # Production databases were built by the pre-Drizzle migrations; this is their upgrade path.
+        legacy = 'spooktober_legacy'
+        self.sql(f'CREATE DATABASE {legacy}', OWNER, self.owner_password)
+        fixture = (HERE.parent / 'src/server/fixtures/legacy-schema.sql').read_text()
+        def legacy_sql(statement, user=OWNER, password=None):
+            return docker('exec', '-e', f'PGPASSWORD={password or self.owner_password}', self.database, 'psql', '-h', 'postgres',
+                          '-U', user, '-d', legacy, '-v', 'ON_ERROR_STOP=1', '-tA', '-c', statement, check=False)
+        self.assertEqual(legacy_sql(fixture).returncode, 0)
+        self.assertEqual(legacy_sql("""INSERT INTO films (id,title,position,watched,watched_at,created_at,updated_at,year)
+          VALUES ('kept','Halloween',0,true,'2026-10-31T23:00:00.123456789Z','2026-10-01T12:00:00Z','2026-10-31T23:00:00Z',2026)""").returncode, 0)
+        with tempfile.TemporaryDirectory() as folder:
+            env = Path(folder) / '.env.migration'
+            env.write_text(f'DATABASE_URL=postgres://{OWNER}:{self.owner_password}@postgres:5432/{legacy}?sslmode=disable\n')
+            env.chmod(0o600)
+            with patch.object(core, 'APP', Path(folder)):
+                migrate, grant = self.commands()
+            for command in (migrate, grant, migrate, grant):
+                run_command(command)
+        self.assertEqual(legacy_sql("SELECT id || ' ' || watched_at FROM films").stdout.strip(),
+                         'kept 2026-10-31T23:00:00.123456789Z')
+        self.assertEqual(legacy_sql('SELECT count(*) FROM drizzle.__drizzle_migrations').stdout.strip(), '1')
+        # The previous release reads its history after a rollback, but can't change it.
+        runtime = lambda statement: legacy_sql(statement, RUNTIME, self.runtime_password)
+        self.assertEqual(runtime('SELECT max(version) FROM schema_migrations').stdout.strip(), '2')
+        for statement in ("INSERT INTO schema_migrations (version) VALUES (3)", "DELETE FROM films",
+                          "SELECT hash FROM drizzle.__drizzle_migrations"):
+            result = runtime(statement)
+            self.assertIn('permission denied', result.stderr, statement)
 
     def test_the_runtime_role_can_run_the_app_image_against_the_granted_database(self):
         run_command(self.commands()[0])

@@ -1,6 +1,6 @@
 import '@tanstack/react-start/server-only'
-import pg from 'pg'
-import { databaseConfig, readyDatabase } from './database'
+import postgres from 'postgres'
+import { databaseConfig } from './database'
 import { privateHeaders } from './auth'
 
 let healthProbe: Promise<void> | undefined
@@ -8,62 +8,33 @@ let healthProbe: Promise<void> | undefined
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms).unref())
 
-// Fields pg sets from the server's handshake but doesn't type.
-type ClientInternals = {
-  processID: number | null
-  connection: { stream: { destroy(): void } }
-}
-
-function probeClient(timeoutMillis: number) {
-  const client = new pg.Client({
-    ...databaseConfig(process.env.DATABASE_URL),
-    connectionTimeoutMillis: timeoutMillis,
-    statement_timeout: timeoutMillis,
-    query_timeout: timeoutMillis
-  })
-  client.on('error', () => {})
-  return client
-}
-
-async function retire(client: pg.Client) {
-  // A statement timeout cannot stop a socket that never reaches Postgres, and
-  // end() waits for the server, so destroy the socket if it doesn't answer.
-  await Promise.race([client.end().catch(() => {}), sleep(1000)])
-  ;(client as unknown as ClientInternals).connection.stream.destroy()
-}
-
-async function cancelBackend(pid: number) {
-  // Closing the socket doesn't stop a backend waiting on a lock, so cancel it
-  // from another connection, bounded in case that one stalls too.
-  const canceller = probeClient(500)
-  await Promise.race([
-    canceller
-      .connect()
-      .then(() => canceller.query('SELECT pg_cancel_backend($1)', [pid])),
-    sleep(500)
-  ]).catch(() => {})
-  void retire(canceller)
-}
-
 async function probeDatabase() {
   // Own this connection so a deadline can retire it without touching the app pool.
-  const client = probeClient(3000)
+  const { url, ...options } = databaseConfig(process.env.DATABASE_URL, 1)
+  const client = postgres(url, {
+    ...options,
+    connect_timeout: 3,
+    connection: { ...options.connection, statement_timeout: 3000 }
+  })
+  const query = client`SELECT id FROM films LIMIT 0`
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     await Promise.race([
-      client.connect().then(() => readyDatabase(client)),
+      query,
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('timeout')), 3000)
         timer.unref()
       })
     ])
   } catch (error) {
-    const pid = (client as unknown as ClientInternals).processID
-    if (pid) await cancelBackend(pid)
+    // Closing the socket doesn't stop a backend waiting on a lock, so cancel it.
+    // The cancel request uses its own connection, so bound it too.
+    await Promise.race([query.cancel(), sleep(500)]).catch(() => {})
     throw error
   } finally {
     clearTimeout(timer)
-    await retire(client)
+    // A SQL statement timeout cannot stop a socket that never reaches Postgres.
+    await client.end({ timeout: 0 })
   }
 }
 

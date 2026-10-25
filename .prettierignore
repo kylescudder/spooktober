@@ -12,6 +12,7 @@ deploy/receiver
 .output
 .tanstack
 src/routeTree.gen.ts
+drizzle/meta
 src/vendor
 test-results
 playwright-report

@@ -1,0 +1,111 @@
+{
+  "id": "d1bbad9c-401c-4c4a-a6e3-65f167b7a500",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.films": {
+      "name": "films",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "watched": {
+          "name": "watched",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "watched_at": {
+          "name": "watched_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "year": {
+          "name": "year",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "films_position_unique": {
+          "name": "films_position_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "year",
+            "position"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "films_id_check": {
+          "name": "films_id_check",
+          "value": "length(\"films\".\"id\") BETWEEN 1 AND 100"
+        },
+        "films_title_check": {
+          "name": "films_title_check",
+          "value": "length(trim(\"films\".\"title\")) BETWEEN 1 AND 200"
+        },
+        "films_position_check": {
+          "name": "films_position_check",
+          "value": "\"films\".\"position\" >= 0"
+        },
+        "films_year_check": {
+          "name": "films_year_check",
+          "value": "\"films\".\"year\" BETWEEN 1900 AND 9999"
+        },
+        "films_watched_date": {
+          "name": "films_watched_date",
+          "value": "\"films\".\"watched\" OR \"films\".\"watched_at\" IS NULL"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

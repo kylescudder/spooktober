@@ -14,7 +14,6 @@ import {
   database,
   listFilms,
   markWatched,
-  readyDatabase,
   reorderFilms
 } from './database.ts'
 import { currentYear, seasonSchema } from '../lib/years.ts'
@@ -50,7 +49,6 @@ const authenticated = t.procedure.use(async ({ ctx, next }) => {
 
 async function storage<T>(work: () => Promise<T>): Promise<T> {
   try {
-    await readyDatabase(database())
     return await work()
   } catch (error) {
     if (error instanceof FilmError) {
