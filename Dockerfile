@@ -6,11 +6,11 @@ COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
-COPY vite.config.ts tsconfig.json ./
+COPY vite.config.ts tsconfig.json eslint.config.js ./
 COPY scripts/ ./scripts/
 COPY src/ ./src/
 COPY public/ ./public/
-RUN bun run typecheck && bun run test && bun run build
+RUN bun run typecheck && bun run lint && bun run test && bun run build
 
 FROM node:24-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS runtime
 WORKDIR /app
