@@ -74,11 +74,14 @@ test('readiness reports database health without revealing films', async ({
   const response = await request.get('/healthz')
   if (process.env.E2E_DATABASE_URL) {
     expect(response.status()).toBe(200)
-    expect(await response.text()).toMatch(/^ok\nrevision .+\n$/)
+    expect(await response.json()).toEqual({
+      ok: true,
+      revision: expect.any(String)
+    })
     expect(response.headers()['x-spooktober-revision']).toBeTruthy()
   } else {
     expect(response.status()).toBe(503)
-    expect(await response.text()).toBe('unavailable\n')
+    expect(await response.json()).toEqual({ ok: false })
   }
   expect(response.headers()['cache-control']).toBe('private, no-store')
 })
@@ -115,5 +118,5 @@ test('Clerk middleware redirects signed-out pages and denies film reads and writ
     `http://127.0.0.1:${Number(process.env.E2E_PORT || 8080) + 2}/healthz`
   )
   expect(health.status()).toBe(503)
-  expect(await health.text()).toBe('unavailable\n')
+  expect(await health.json()).toEqual({ ok: false })
 })

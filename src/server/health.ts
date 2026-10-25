@@ -3,20 +3,18 @@ import { database, readyDatabase } from './database'
 import { privateHeaders } from './auth'
 
 export async function healthResponse() {
+  const revision = process.env.SPOOKTOBER_REVISION || 'unknown'
+  const headers = { ...privateHeaders, 'X-Spooktober-Revision': revision }
   try {
-    await readyDatabase(database())
-    const revision = process.env.SPOOKTOBER_REVISION || 'unknown'
-    return new Response(`ok\nrevision ${revision}\n`, {
-      headers: {
-        ...privateHeaders,
-        'Content-Type': 'text/plain; charset=utf-8',
-        'X-Spooktober-Revision': revision
-      }
-    })
+    // Fail before the server's idle timeout drops the request.
+    await Promise.race([
+      readyDatabase(database()),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('timeout')), 3000).unref()
+      )
+    ])
+    return Response.json({ ok: true, revision }, { headers })
   } catch {
-    return new Response('unavailable\n', {
-      status: 503,
-      headers: privateHeaders
-    })
+    return Response.json({ ok: false }, { status: 503, headers })
   }
 }
