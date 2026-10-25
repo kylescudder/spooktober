@@ -1,26 +1,39 @@
 import '@tanstack/react-start/server-only'
-import { database, readyDatabase } from './database'
+import pg from 'pg'
+import { databaseConfig, readyDatabase } from './database'
 import { privateHeaders } from './auth'
 
 let healthProbe: Promise<void> | undefined
 
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms).unref())
+
 async function probeDatabase() {
-  const client = await database().connect()
-  let discard = false
+  // Own this connection so a deadline can retire it without touching the app pool.
+  const client = new pg.Client({
+    ...databaseConfig(process.env.DATABASE_URL),
+    connectionTimeoutMillis: 3000,
+    statement_timeout: 3000,
+    query_timeout: 3000
+  })
+  client.on('error', () => {})
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    await client.query('BEGIN')
-    await client.query("SET LOCAL statement_timeout = '3s'")
-    await readyDatabase(client)
-    await client.query('COMMIT')
-  } catch (error) {
-    try {
-      await client.query('ROLLBACK')
-    } catch {
-      discard = true
-    }
-    throw error
+    await Promise.race([
+      client.connect().then(() => readyDatabase(client)),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('timeout')), 3000)
+        timer.unref()
+      })
+    ])
   } finally {
-    client.release(discard)
+    clearTimeout(timer)
+    // A statement timeout cannot stop a socket that never reaches Postgres, and
+    // end() waits for the server, so destroy the socket if it doesn't answer.
+    await Promise.race([client.end().catch(() => {}), sleep(1000)])
+    ;(
+      client as unknown as { connection: { stream: { destroy(): void } } }
+    ).connection.stream.destroy()
   }
 }
 
@@ -30,20 +43,10 @@ export async function healthResponse() {
   healthProbe ??= probeDatabase().finally(() => {
     healthProbe = undefined
   })
-  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    // Fail before the server's idle timeout drops the request.
-    await Promise.race([
-      healthProbe,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error('timeout')), 3000)
-        timer.unref()
-      })
-    ])
+    await healthProbe
     return Response.json({ ok: true, revision }, { headers })
   } catch {
     return Response.json({ ok: false }, { status: 503, headers })
-  } finally {
-    clearTimeout(timer)
   }
 }

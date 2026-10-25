@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { createDatabase, database, migrateDatabase } from './database.ts'
+import { stallHealthQueries } from './postgres-proxy.ts'
 
 test('health deadlines stop SQL, preserve the pool and recover', async () => {
   const value = process.env.TEST_DATABASE_URL
@@ -16,7 +17,12 @@ test('health deadlines stop SQL, preserve the pool and recover', async () => {
   const url = new URL(value)
   url.pathname = '/' + name
   const owner = createDatabase(url.toString())
-  process.env.DATABASE_URL = url.toString()
+  const proxy = await stallHealthQueries(
+    url.toString(),
+    /FROM schema_migrations/i
+  )
+  proxy.allowNewConnections()
+  process.env.DATABASE_URL = proxy.url
   process.env.SPOOKTOBER_REVISION = 'health-test'
   const app = database()
   const { healthResponse } = await import('./health.ts')
@@ -75,8 +81,24 @@ test('health deadlines stop SQL, preserve the pool and recover', async () => {
       lock.release()
     }
     assert.equal((await healthResponse()).status, 200)
+    proxy.stall()
+    const responses = await Promise.all(
+      Array.from({ length: 8 }, () => healthResponse())
+    )
+    for (const response of responses) {
+      assert.equal(response.status, 503)
+      assert.deepEqual(await response.json(), { ok: false })
+    }
+    proxy.allowNewConnections()
+    assert.equal((await healthResponse()).status, 200)
+    const deadline = Date.now() + 1000
+    while (proxy.stalledConnections && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    assert.equal(proxy.stalledConnections, 0)
   } finally {
+    proxy.release()
     await app.end()
+    await proxy.close()
     await owner.end()
     await control.query(`DROP DATABASE "${name}" WITH (FORCE)`)
     await control.end()
