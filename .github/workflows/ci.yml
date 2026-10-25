@@ -43,19 +43,28 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.4
-      - name: Check deployment security boundaries
-        run: |
-          python3 -B -m unittest discover -s deploy -p 'test_*.py' -v
-          node --test deploy/receiver/server.test.mjs
-      - run: HUSKY=0 bun install --frozen-lockfile
-      - run: bun run typecheck
-      - run: bun run lint
-      - run: bun run format:check
-      - run: bun run test
-      - run: bun run build
-      - run: bun run test:integration
-      - run: bunx --no-install playwright install --with-deps chromium
-      - run: bun run test:e2e
+      - name: Test deployment hooks
+        run: python3 -B -m unittest discover -s deploy -p 'test_*.py' -v
+      - name: Test webhook receiver
+        run: node --test deploy/receiver/server.test.mjs
+      - name: Install dependencies
+        run: HUSKY=0 bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Lint
+        run: bun run lint
+      - name: Check formatting
+        run: bun run format:check
+      - name: Test
+        run: bun run test
+      - name: Build
+        run: bun run build
+      - name: Test integration
+        run: bun run test:integration
+      - name: Install Playwright browser
+        run: bunx --no-install playwright install --with-deps chromium
+      - name: Test end-to-end
+        run: bun run test:e2e
       - name: Save browser evidence
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -74,7 +83,8 @@ jobs:
           persist-credentials: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       # Builds (and so type-checks and unit-tests) the production image without publishing it.
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      - name: Build production image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           push: false
@@ -84,7 +94,7 @@ jobs:
           sbom: false
       # Runs the deployer's exact migration and permission commands inside that image
       # against disposable PostgreSQL, so a packaging change cannot break production.
-      - name: Migrate and grant inside the runtime image
+      - name: Test migrations in production image
         env:
           SPOOKTOBER_TEST_IMAGE: spooktober:ci
         run: python3 -B -m unittest discover -s deploy -p test_image.py -v
