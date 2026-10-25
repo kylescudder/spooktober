@@ -126,7 +126,7 @@ export async function migrateDatabase(pool: Pool) {
   })
 }
 
-export async function readyDatabase(pool: Pool) {
+export async function readyDatabase(pool: Queryable) {
   const files = await migrationFiles()
   const {
     rows: [history]
