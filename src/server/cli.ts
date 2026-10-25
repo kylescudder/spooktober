@@ -1,7 +1,7 @@
+import { createDeploymentDatabase } from './deployment-database.ts'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import {
-  createDatabase,
   grantRuntimeAccess,
   importFilms,
   listAllFilms,
@@ -36,7 +36,7 @@ async function run() {
     )
   if (yearIndex >= 0 && ['migrate', 'grant'].includes(command))
     throw new Error('Only seed/import/export accept --year.')
-  const pool = createDatabase(process.env.DATABASE_URL)
+  const pool = createDeploymentDatabase(process.env.DATABASE_URL)
   try {
     if (command === 'migrate') await migrateDatabase(pool)
     else if (command === 'grant') await grantRuntimeAccess(pool, source)
