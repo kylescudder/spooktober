@@ -196,7 +196,7 @@ jobs:
       # Fails as soon as the host reports a terminal failure for this digest and
       # revision; stalled hosts fail at HOST_TIMEOUT. Success needs both the host's
       # report and the public site serving this revision.
-      - name: Wait for the host and production
+      - name: Wait for production
         env:
           DIGEST: ${{ needs.publish.outputs.digest }}
           REVISION: ${{ github.sha }}
