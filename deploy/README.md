@@ -14,7 +14,6 @@ are documented in [deploy-core](https://github.com/kylescudder/deploy-core).
 There are no vendored engine files, lock files or sync PRs. Do not install an
 app-specific LaunchAgent. Apply future engine changes once through the central service.
 
-
 The host is ARM macOS with Colima, not a Linux/systemd host. Read
 `/Users/kyle/platform/runbook.md` and use the host deployment and operations runbooks
 for the shared platform. This file owns the application's deployment commands.
@@ -25,19 +24,19 @@ Application-specific behavior is in `hooks.py`; deployment definitions are centr
 
 ## Actual configuration
 
-| Item | Value |
-| --- | --- |
-| Checkout | `/Users/kyle/platform/apps/spooktober` |
-| Image repository | `ghcr.io/kylescudder/spooktober`, public |
-| App hostname | `spooktober.kylescudder.co.uk` |
-| App upstream | `spooktober:8080` on `platform-web` |
-| Database | `spooktober`, private `postgres:5432` on internal `platform-db` |
-| Database roles | `spooktober_owner` for migrations and grants, `spooktober_runtime` for the app |
-| Hook hostname/path | `deploy.kylescudder.co.uk/hooks/spooktober` |
-| Hook upstream | `spooktober-deploy-hook:9000` on `platform-web` only |
-| Host trigger | launchd `com.kylescudder.deploy-core`, independent app workers |
-| Deploy identity | Kyle, UID/GID `501:20`, owner of the Colima session |
-| GitHub environment | `production`, restricted to branch `main`, no required reviewers |
+| Item               | Value                                                                          |
+| ------------------ | ------------------------------------------------------------------------------ |
+| Checkout           | `/Users/kyle/platform/apps/spooktober`                                         |
+| Image repository   | `ghcr.io/kylescudder/spooktober`, public                                       |
+| App hostname       | `spooktober.kylescudder.co.uk`                                                 |
+| App upstream       | `spooktober:8080` on `platform-web`                                            |
+| Database           | `spooktober`, private `postgres:5432` on internal `platform-db`                |
+| Database roles     | `spooktober_owner` for migrations and grants, `spooktober_runtime` for the app |
+| Hook hostname/path | `deploy.kylescudder.co.uk/hooks/spooktober`                                    |
+| Hook upstream      | `spooktober-deploy-hook:9000` on `platform-web` only                           |
+| Host trigger       | launchd `com.kylescudder.deploy-core`, independent app workers                 |
+| Deploy identity    | Kyle, UID/GID `501:20`, owner of the Colima session                            |
+| GitHub environment | `production`, restricted to branch `main`, no required reviewers               |
 
 The receiver has a read-only root filesystem, no capabilities, no Docker socket,
 no database network and no host ports. Only its queue directory is writable;
@@ -101,15 +100,15 @@ On a fresh checkout, copy `.env.example` to `.env`; preserve existing private
 configuration. Supply these settings at container startup, keeping owner credentials
 in `.env.migration`:
 
-| Setting | Value |
-| --- | --- |
-| `DATABASE_URL` | Restricted `spooktober_runtime` login for the `spooktober` database |
-| `CLERK_PUBLISHABLE_KEY` | Production instance's public `pk_live_...` key |
-| `CLERK_SECRET_KEY` | Same instance's private `sk_live_...` key |
-| `CLERK_ALLOWED_USER_IDS` | Kyle and Rhiann's exact production user IDs, comma separated |
-| `PUBLIC_URL` | `https://spooktober.kylescudder.co.uk` |
-| `PLATFORM_WEB_NETWORK`, `PLATFORM_DB_NETWORK` | `platform-web`, `platform-db` |
-| `SPOOKTOBER_IMAGE` | Successfully deployed `ghcr.io/kylescudder/spooktober@sha256:<digest>` |
+| Setting                                       | Value                                                                  |
+| --------------------------------------------- | ---------------------------------------------------------------------- |
+| `DATABASE_URL`                                | Restricted `spooktober_runtime` login for the `spooktober` database    |
+| `CLERK_PUBLISHABLE_KEY`                       | Production instance's public `pk_live_...` key                         |
+| `CLERK_SECRET_KEY`                            | Same instance's private `sk_live_...` key                              |
+| `CLERK_ALLOWED_USER_IDS`                      | Kyle and Rhiann's exact production user IDs, comma separated           |
+| `PUBLIC_URL`                                  | `https://spooktober.kylescudder.co.uk`                                 |
+| `PLATFORM_WEB_NETWORK`, `PLATFORM_DB_NETWORK` | `platform-web`, `platform-db`                                          |
+| `SPOOKTOBER_IMAGE`                            | Successfully deployed `ghcr.io/kylescudder/spooktober@sha256:<digest>` |
 
 Percent-encode special characters in database URL credentials. `sslmode=disable`
 is for the private Docker database network; use the endpoint's required TLS
@@ -144,12 +143,12 @@ The production CNAME records are listed below. Check them against the existing
 before changing DNS. Keep proxying off (**DNS only**) and verify DNS, TLS
 certificates and email-domain verification there before release.
 
-| Name | Target |
-| --- | --- |
-| `clerk.spooktober.kylescudder.co.uk` | `frontend-api.clerk.services` |
-| `accounts.spooktober.kylescudder.co.uk` | `accounts.clerk.services` |
-| `clkmail.spooktober.kylescudder.co.uk` | `mail.o5w90otf55dy.clerk.services` |
-| `clk._domainkey.spooktober.kylescudder.co.uk` | `dkim1.o5w90otf55dy.clerk.services` |
+| Name                                           | Target                              |
+| ---------------------------------------------- | ----------------------------------- |
+| `clerk.spooktober.kylescudder.co.uk`           | `frontend-api.clerk.services`       |
+| `accounts.spooktober.kylescudder.co.uk`        | `accounts.clerk.services`           |
+| `clkmail.spooktober.kylescudder.co.uk`         | `mail.o5w90otf55dy.clerk.services`  |
+| `clk._domainkey.spooktober.kylescudder.co.uk`  | `dkim1.o5w90otf55dy.clerk.services` |
 | `clk2._domainkey.spooktober.kylescudder.co.uk` | `dkim2.o5w90otf55dy.clerk.services` |
 
 The app needs outbound HTTPS/DNS to Clerk, and browsers must reach its Frontend
@@ -356,4 +355,3 @@ mark automatic deployment complete until a main merge's Release deploy job is
 green and public health reports that same 40-character revision. Real
 Kyle/Rhiann login, logout and simultaneous edits require their actual sessions;
 trusted-session integration tests alone do not establish that manual acceptance.
-

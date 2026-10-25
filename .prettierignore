@@ -1,0 +1,17 @@
+node_modules
+dist
+coverage
+bun.lock
+secrets
+state
+backups
+deploy-spool
+# Vendored into deploy-core, which pins this file by hash
+deploy/receiver
+# Generated, vendored and test output
+.output
+.tanstack
+src/routeTree.gen.ts
+src/vendor
+test-results
+playwright-report

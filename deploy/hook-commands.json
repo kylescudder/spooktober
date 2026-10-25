@@ -1,15 +1,7 @@
 [
   [
     "compose",
-    [
-      "exec",
-      "-T",
-      "spooktober",
-      "node",
-      "database.cjs",
-      "export",
-      "-"
-    ],
+    ["exec", "-T", "spooktober", "node", "database.cjs", "export", "-"],
     null
   ],
   [
