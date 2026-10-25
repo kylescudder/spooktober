@@ -355,3 +355,17 @@ mark automatic deployment complete until a main merge's Release deploy job is
 green and public health reports that same 40-character revision. Real
 Kyle/Rhiann login, logout and simultaneous edits require their actual sessions;
 trusted-session integration tests alone do not establish that manual acceptance.
+
+## Database connection budget
+
+The runtime role is limited to eight PostgreSQL connections. Application work
+uses at most four, health checks at most one, and deployment verification or
+database CLI work at most one. Sequential deployment commands use their own
+one-connection client instead of importing the application pool. This leaves
+two slots for operator connections during a release; owner migrations use a
+separate role.
+
+CI exercises the real deployment client against an eight-connection test role,
+with all four application slots held open. Concurrent deployment queries must
+share one backend, health must still connect, two spare slots must remain usable,
+and a ninth connection must be rejected by PostgreSQL.
