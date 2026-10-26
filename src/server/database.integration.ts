@@ -79,7 +79,7 @@ test('deployment CLI exports and restores every season when the current year is 
     new Promise<string>((resolve, reject) => {
       const child = execFile(
         process.execPath,
-        ['--import', 'tsx', 'src/server/cli.ts', ...args],
+        ['src/server/cli.ts', ...args],
         {
           env: { ...process.env, DATABASE_URL: databaseURL.href }
         },
