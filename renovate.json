@@ -2,6 +2,8 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
   "prHourlyLimit": 5,
+  "osvVulnerabilityAlerts": true,
+  "platformAutomerge": false,
   "packageRules": [
     {
       "matchManagers": ["npm"],
@@ -15,6 +17,22 @@
       "matchManagers": ["npm", "bun"],
       "matchUpdateTypes": ["pin"],
       "enabled": false
+    },
+    {
+      "description": "Hold TypeScript at 5.x until TypeScript 7 has a JS API for typescript-eslint",
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<7"
+    },
+    {
+      "description": "Merge digest updates once every check passes",
+      "matchUpdateTypes": ["digest", "pinDigest"],
+      "automerge": true
+    },
+    {
+      "description": "Merge non-major GitHub Actions updates once every check passes",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
     }
   ],
   "bun": {
