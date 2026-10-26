@@ -2,6 +2,7 @@ import '@tanstack/react-start/server-only'
 import postgres from 'postgres'
 import { databaseConfig } from './database'
 import { privateHeaders } from './auth'
+import { readAuthEnv } from './env'
 
 let healthProbe: Promise<void> | undefined
 
@@ -39,7 +40,7 @@ async function probeDatabase() {
 }
 
 export async function healthResponse() {
-  const revision = process.env.SPOOKTOBER_REVISION || 'unknown'
+  const revision = readAuthEnv().SPOOKTOBER_REVISION
   const headers = { ...privateHeaders, 'X-Spooktober-Revision': revision }
   healthProbe ??= probeDatabase().finally(() => {
     healthProbe = undefined

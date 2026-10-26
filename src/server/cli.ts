@@ -10,6 +10,7 @@ import {
 } from './database.ts'
 import { exportWatchlist, readWatchlist } from './watchlist.ts'
 import { currentYear, yearSchema } from '../lib/years.ts'
+import { readDatabaseEnv } from './env'
 
 async function run() {
   const args = process.argv.slice(2)
@@ -35,7 +36,7 @@ async function run() {
     )
   if (yearIndex >= 0 && ['migrate', 'grant'].includes(command))
     throw new Error('Only seed/import/export accept --year.')
-  const db = createDeploymentDatabase(process.env.DATABASE_URL)
+  const db = createDeploymentDatabase(readDatabaseEnv().DATABASE_URL)
   try {
     if (command === 'migrate') await migrateDatabase(db)
     else if (command === 'grant') await grantRuntimeAccess(db, source)

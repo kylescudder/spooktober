@@ -4,6 +4,7 @@ import { and, asc, count, eq, inArray, max, sql } from 'drizzle-orm'
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { migrate } from 'drizzle-orm/postgres-js/migrator'
 import postgres from 'postgres'
+import { readDatabaseEnv } from './env'
 import type { AnnualFilm, Film, ImportedFilm } from '../lib/films.ts'
 import { FilmError, completeOrder } from '../lib/validation.ts'
 import { currentYear } from '../lib/years.ts'
@@ -25,16 +26,9 @@ export function databaseConfig(
   max = 4
 ): postgres.Options<Record<string, never>> & { url: string } {
   try {
-    if (!databaseURL) throw new Error()
-    const url = new URL(databaseURL)
-    if (
-      !['postgres:', 'postgresql:'].includes(url.protocol) ||
-      !url.hostname ||
-      !url.pathname.replace(/\//g, '')
-    )
-      throw new Error()
+    const { DATABASE_URL } = readDatabaseEnv({ DATABASE_URL: databaseURL })
     return {
-      url: databaseURL,
+      url: DATABASE_URL,
       max,
       connect_timeout: 5,
       idle_timeout: 300,
