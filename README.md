@@ -106,3 +106,11 @@ Run all pending PostgreSQL migrations before starting the application. For the o
 ## Artwork
 
 The [pumpkin-and-candle illustration](public/images/pumpkins-and-candles.png) was created with built-in imagegen. Prompt: two warm orange pumpkins, one small gently smiling jack-o-lantern, two ivory candles with amber flames and autumn leaves; a hand-painted vintage storybook/gouache vignette, rich pumpkin orange, warm cream and brown shadows, transparent background, no text or logos. Generated at 1536 × 1024.
+
+## Runtime configuration
+
+Server settings are validated with `@t3-oss/env-core` and Zod when they are read.
+Production builds need no runtime credentials. Invalid settings report their names
+without logging secret values; see `.env.example` for the deployment settings.
+Migration commands validate database settings independently of Clerk configuration.
+Missing Clerk keys or an invalid allow-list retain the existing setup/access-denied responses. `PUBLIC_URL`, when supplied, must be an exact HTTP(S) origin.

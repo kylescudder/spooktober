@@ -1,4 +1,5 @@
 import '@tanstack/react-start/server-only'
+import { readAuthEnv } from './env'
 
 export const privateHeaders = {
   'Cache-Control': 'private, no-store',
@@ -15,27 +16,9 @@ export interface Configuration {
 export function configuration(
   env: Record<string, string | undefined> = process.env
 ): Configuration {
-  let publicURL = (env.PUBLIC_URL ?? '').replace(/\/$/, '')
-  if (publicURL) {
-    try {
-      const url = new URL(publicURL)
-      if (
-        !['http:', 'https:'].includes(url.protocol) ||
-        url.username ||
-        url.password ||
-        url.pathname !== '/' ||
-        url.search ||
-        url.hash
-      )
-        throw new Error()
-      publicURL = url.origin
-    } catch {
-      throw new Error(
-        'PUBLIC_URL must be a full HTTP or HTTPS origin, e.g. https://films.example.com'
-      )
-    }
-  }
-  const ids = (env.CLERK_ALLOWED_USER_IDS ?? '')
+  const validated = readAuthEnv(env)
+  const publicURL = validated.PUBLIC_URL ?? ''
+  const ids = (validated.CLERK_ALLOWED_USER_IDS ?? '')
     .split(',')
     .map((id) => id.trim())
   const valid =
@@ -51,9 +34,12 @@ export function configuration(
 export function clerkConfiguration(
   env: Record<string, string | undefined> = process.env
 ) {
+  const validated = readAuthEnv(env)
   const publishableKey =
-    env.CLERK_PUBLISHABLE_KEY ?? env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? ''
-  const secretKey = env.CLERK_SECRET_KEY ?? ''
+    env.CLERK_PUBLISHABLE_KEY === undefined
+      ? (validated.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? '')
+      : (validated.CLERK_PUBLISHABLE_KEY ?? '')
+  const secretKey = validated.CLERK_SECRET_KEY ?? ''
   const mode = /^pk_(test|live)_[a-zA-Z0-9+/]+={0,2}$/.exec(publishableKey)?.[1]
   const configured =
     !!mode &&
