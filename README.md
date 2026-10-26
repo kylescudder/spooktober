@@ -16,10 +16,11 @@ src/
   routes/                    # TanStack Router pages, tRPC endpoint and health route
   router.tsx, start.ts        # Router and request middleware configuration
   film-list.tsx              # Interactive React watchlist
-  server/                    # PostgreSQL, tRPC router, maintenance commands and tests
+  server/                    # Drizzle schema, tRPC router, maintenance commands and tests
   lib/, components/          # Shared Zod schemas, typed client and UI components
   styles.css, vendor/        # Styling
-  migrations/, seed.json     # Existing PostgreSQL schema and original film list
+  seed.json                  # Original film list
+drizzle/                     # Drizzle migrations (bun run db:generate after schema changes)
 public/                      # Artwork and favicon for this app
 Dockerfile, compose.yaml     # Production app using the shared platform
 compose.dev.yaml             # Local app and development PostgreSQL
@@ -52,7 +53,7 @@ docker compose -f compose.dev.yaml up -d spooktober
 
 Open <http://localhost:8080>. Seed once for a fresh list, or use `node database.cjs import -` with an exported JSON list instead. Seed/import refuse to replace a populated year. Normal startup applies neither migrations nor seed data. `docker compose -f compose.dev.yaml down` retains the development database volume.
 
-Migration `002_annual_watchlists.sql` assigns the original shared list to **2026**, preserving its order, watched status and timestamps. Run `db migrate` as the schema owner before starting this version. Other seasons start empty. `export` without `--year` backs up **all seasons**, including a `year` on every film; `import` restores those year associations and each season's order in one transaction. Supply `--year 2026` to export a single season, for example `bun run db export /tmp/spooktober-2026.json --year 2026`. Single-season exports omit the year, so supply the same `--year` when restoring. Seed and untagged imports default to the current year. Tagged imports with an explicit `--year` reject any other season. All target years must be empty, and film IDs remain globally unique; imports refuse reused IDs. Explicit seeding in another year generates fresh IDs.
+The original shared list belongs to **2026**, preserving its order, watched status and timestamps. Run `db migrate` as the schema owner before starting a new version; the schema lives in `src/server/schema.ts` and migrations in `drizzle/`, applied by Drizzle, whose journal sits in a `drizzle` schema the runtime role can't see. Other seasons start empty. `export` without `--year` backs up **all seasons**, including a `year` on every film; `import` restores those year associations and each season's order in one transaction. Supply `--year 2026` to export a single season, for example `bun run db export /tmp/spooktober-2026.json --year 2026`. Single-season exports omit the year, so supply the same `--year` when restoring. Seed and untagged imports default to the current year. Tagged imports with an explicit `--year` reject any other season. All target years must be empty, and film IDs remain globally unique; imports refuse reused IDs. Explicit seeding in another year generates fresh IDs.
 
 ## Develop with Bun
 

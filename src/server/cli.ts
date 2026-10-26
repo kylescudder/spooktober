@@ -6,8 +6,7 @@ import {
   importFilms,
   listAllFilms,
   listFilms,
-  migrateDatabase,
-  readyDatabase
+  migrateDatabase
 } from './database.ts'
 import { exportWatchlist, readWatchlist } from './watchlist.ts'
 import { currentYear, yearSchema } from '../lib/years.ts'
@@ -36,17 +35,16 @@ async function run() {
     )
   if (yearIndex >= 0 && ['migrate', 'grant'].includes(command))
     throw new Error('Only seed/import/export accept --year.')
-  const pool = createDeploymentDatabase(process.env.DATABASE_URL)
+  const db = createDeploymentDatabase(process.env.DATABASE_URL)
   try {
-    if (command === 'migrate') await migrateDatabase(pool)
-    else if (command === 'grant') await grantRuntimeAccess(pool, source)
+    if (command === 'migrate') await migrateDatabase(db)
+    else if (command === 'grant') await grantRuntimeAccess(db, source)
     else {
-      await readyDatabase(pool)
       if (command === 'export')
         await exportWatchlist(
           year === undefined
-            ? await listAllFilms(pool)
-            : await listFilms(pool, year),
+            ? await listAllFilms(db)
+            : await listFilms(db, year),
           source
         )
       else {
@@ -56,11 +54,11 @@ async function run() {
         // Supplied seed IDs belong to 2026; allow the template in later seasons.
         if (command === 'seed' && (year ?? currentYear()) !== 2026)
           for (const film of films) film.id = randomUUID()
-        await importFilms(pool, films, year)
+        await importFilms(db, films, year)
       }
     }
   } finally {
-    await pool.end()
+    await db.$client.end()
   }
 }
 

@@ -11,6 +11,7 @@ COPY vite.config.ts tsconfig.json eslint.config.js ./
 COPY scripts/ ./scripts/
 COPY src/ ./src/
 COPY public/ ./public/
+COPY drizzle/ ./drizzle/
 RUN bun run typecheck && bun run lint && bun run test && bun run build
 
 FROM node:24-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS runtime
@@ -20,7 +21,7 @@ ENV SPOOKTOBER_REVISION=$SPOOKTOBER_REVISION
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=8080 NODE_OPTIONS=--max-old-space-size=128
 COPY --from=build --chown=node:node /app/.output ./.output
 COPY --from=build --chown=node:node /app/.output/database.cjs ./database.cjs
-COPY --from=build --chown=node:node /app/src/migrations ./src/migrations
+COPY --from=build --chown=node:node /app/drizzle ./drizzle
 COPY --from=build --chown=node:node /app/src/seed.json ./src/seed.json
 USER node
 EXPOSE 8080

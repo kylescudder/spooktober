@@ -2,7 +2,7 @@ import '@tanstack/react-start/server-only'
 import { auth } from '@clerk/tanstack-react-start/server'
 import { redirect } from '@tanstack/react-router'
 import { accessFailure, clerkConfiguration } from './auth'
-import { database, listFilms, readyDatabase } from './database'
+import { database, listFilms } from './database'
 import type { Film } from '../lib/films'
 import { currentYear } from '../lib/years'
 
@@ -27,9 +27,7 @@ export async function pageData(
   if (failure) throw redirect({ to: '/access-denied' })
   let films: Film[] | null = null
   try {
-    const pool = database()
-    await readyDatabase(pool)
-    films = await listFilms(pool, year)
+    films = await listFilms(database(), year)
   } catch {
     console.error(
       'Spooktober could not load the initial watchlist from PostgreSQL.'

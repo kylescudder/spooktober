@@ -8,6 +8,5 @@ await build({
   platform: 'node',
   target: 'node22',
   format: 'cjs',
-  minify: true,
-  external: ['pg-native']
+  minify: true
 })

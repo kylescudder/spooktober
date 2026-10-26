@@ -13,13 +13,13 @@ test('health deadlines stop SQL, preserve the pool and recover', async () => {
   }
   const control = createDatabase(value)
   const name = 'spook_health_' + randomUUID().replaceAll('-', '')
-  await control.query(`CREATE DATABASE "${name}"`)
+  await control.$client.unsafe(`CREATE DATABASE "${name}"`)
   const url = new URL(value)
   url.pathname = '/' + name
   const owner = createDatabase(url.toString())
   const proxy = await stallHealthQueries(
     url.toString(),
-    /FROM schema_migrations/i
+    /^SELECT id FROM films LIMIT 0$/i
   )
   proxy.allowNewConnections()
   process.env.DATABASE_URL = proxy.url
@@ -29,10 +29,10 @@ test('health deadlines stop SQL, preserve the pool and recover', async () => {
   try {
     await migrateDatabase(owner)
     assert.equal((await healthResponse()).status, 200)
-    const lock = await owner.connect()
+    const lock = await owner.$client.reserve()
     try {
-      await lock.query('BEGIN')
-      await lock.query('LOCK TABLE films IN ACCESS EXCLUSIVE MODE')
+      await lock`BEGIN`
+      await lock`LOCK TABLE films IN ACCESS EXCLUSIVE MODE`
       const responses = await Promise.all(
         Array.from({ length: 8 }, () => healthResponse())
       )
@@ -48,7 +48,7 @@ test('health deadlines stop SQL, preserve the pool and recover', async () => {
       let timer: ReturnType<typeof setTimeout> | undefined
       try {
         const available = await Promise.race([
-          app.query('SELECT 42 AS answer'),
+          app.$client`SELECT 42 AS answer`,
           new Promise<never>((_, reject) => {
             timer = setTimeout(
               () =>
@@ -57,18 +57,13 @@ test('health deadlines stop SQL, preserve the pool and recover', async () => {
             )
           })
         ])
-        assert.equal(available.rows[0].answer, 42)
+        assert.equal(available[0]!.answer, 42)
         const deadline = Date.now() + 1500
         for (;;) {
-          const {
-            rows: [activity]
-          } = await owner.query(
-            `SELECT count(*)::int AS active
-            FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()
-            AND state = 'active' AND query ILIKE '%FROM schema_migrations%'`,
-            [name]
-          )
-          if (activity.active === 0) break
+          const [activity] = await owner.$client`SELECT count(*)::int AS active
+            FROM pg_stat_activity WHERE datname = ${name} AND pid <> pg_backend_pid()
+            AND state = 'active' AND query ILIKE '%FROM films LIMIT 0%'`
+          if (activity!.active === 0) break
           if (Date.now() > deadline)
             throw new Error('Health SQL outlived its deadline')
           await new Promise((resolve) => setTimeout(resolve, 25))
@@ -77,7 +72,7 @@ test('health deadlines stop SQL, preserve the pool and recover', async () => {
         clearTimeout(timer)
       }
     } finally {
-      await lock.query('ROLLBACK')
+      await lock`ROLLBACK`
       lock.release()
     }
     assert.equal((await healthResponse()).status, 200)
@@ -97,10 +92,10 @@ test('health deadlines stop SQL, preserve the pool and recover', async () => {
     assert.equal(proxy.stalledConnections, 0)
   } finally {
     proxy.release()
-    await app.end()
+    await app.$client.end()
     await proxy.close()
-    await owner.end()
-    await control.query(`DROP DATABASE "${name}" WITH (FORCE)`)
-    await control.end()
+    await owner.$client.end()
+    await control.$client.unsafe(`DROP DATABASE "${name}" WITH (FORCE)`)
+    await control.$client.end()
   }
 })

@@ -118,7 +118,7 @@ The legacy `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` name is also accepted, so existin
 The image listens on `0.0.0.0:8080`, with a 256 MiB container limit, a 128 MiB
 JavaScript heap and four database connections. Its filesystem is read-only with
 a temporary `/tmp`; durable data lives in PostgreSQL. `/healthz` checks database
-connectivity and migration history, returning 200 or 503 without film data.
+connectivity and access to `films`, returning 200 or 503 without film data.
 
 ## Clerk configuration
 
@@ -297,8 +297,10 @@ docker run --rm --read-only --network platform-db --env-file .env.migration \
   ghcr.io/kylescudder/spooktober@sha256:<digest> node database.cjs grant spooktober_runtime
 ```
 
-This gives `spooktober_runtime` read/insert/update on `films`, read-only access
-to `schema_migrations`, and no delete or schema changes.
+This gives `spooktober_runtime` read/insert/update on `films`, no access to the
+Drizzle migration journal (schema `drizzle`), and no delete or schema changes.
+Databases from before Drizzle keep a read-only `schema_migrations`, so a rollback
+to those releases still starts.
 
 For an empty migrated database, keep the app stopped and choose either a seed
 for a fresh list or an import from a private snapshot:
