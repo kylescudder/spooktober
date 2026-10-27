@@ -7,6 +7,8 @@ import type { AppRouter } from '../server/trpc'
 type Inputs = inferRouterInputs<AppRouter>['films']
 export type SaveAction =
   | { procedure: 'add'; input: Omit<Inputs['add'], 'year'> }
+  | { procedure: 'edit'; input: Omit<Inputs['edit'], 'year'> }
+  | { procedure: 'remove'; input: Omit<Inputs['remove'], 'year'> }
   | { procedure: 'setWatched'; input: Omit<Inputs['setWatched'], 'year'> }
   | { procedure: 'reorder'; input: Omit<Inputs['reorder'], 'year'> }
 
@@ -32,6 +34,10 @@ export async function sendRequest(year: number, action?: SaveAction) {
     switch (action.procedure) {
       case 'add':
         return await client.films.add.mutate({ ...action.input, year })
+      case 'edit':
+        return await client.films.edit.mutate({ ...action.input, year })
+      case 'remove':
+        return await client.films.remove.mutate({ ...action.input, year })
       case 'setWatched':
         return await client.films.setWatched.mutate({ ...action.input, year })
       case 'reorder':

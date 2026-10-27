@@ -94,7 +94,7 @@ export async function migrateDatabase(db: Database) {
 const roleName = /^[a-z_][a-z0-9_]{0,62}$/
 
 // The app's login may only read and write the watchlist; it can neither see
-// migration history nor delete films. Run as the owner after every migration.
+// migration history or change schema. Run as the owner after every migration.
 export async function grantRuntimeAccess(db: Database, role: string) {
   if (!roleName.test(role))
     throw new Error(
@@ -113,9 +113,8 @@ export async function grantRuntimeAccess(db: Database, role: string) {
       throw new Error('Run db migrate before granting runtime access.')
     await tx.execute(sql`GRANT USAGE ON SCHEMA public TO ${login}`)
     await tx.execute(
-      sql`GRANT SELECT, INSERT, UPDATE ON public.films TO ${login}`
+      sql`GRANT SELECT, INSERT, UPDATE, DELETE ON public.films TO ${login}`
     )
-    await tx.execute(sql`REVOKE DELETE ON public.films FROM ${login}`)
     if (tables!.journal)
       await tx.execute(sql`REVOKE ALL ON SCHEMA drizzle FROM ${login}`)
     // The previous release reads its history table; keep that read-only grant
@@ -134,7 +133,7 @@ export async function grantRuntimeAccess(db: Database, role: string) {
       AND has_table_privilege(${role}, 'public.films', 'SELECT')
       AND has_table_privilege(${role}, 'public.films', 'INSERT')
       AND has_table_privilege(${role}, 'public.films', 'UPDATE')
-      AND NOT has_table_privilege(${role}, 'public.films', 'DELETE')
+      AND has_table_privilege(${role}, 'public.films', 'DELETE')
       AND (to_regnamespace('drizzle') IS NULL OR NOT has_schema_privilege(${role}, 'drizzle', 'USAGE'))
       AND (to_regclass('public.schema_migrations') IS NULL OR (
         has_table_privilege(${role}, 'public.schema_migrations', 'SELECT')
@@ -254,6 +253,26 @@ export async function markWatched(
   })
 }
 
+export async function editFilm(
+  db: Database,
+  id: string,
+  title: string,
+  year = currentYear()
+) {
+  return changeFilms(db, year, async (tx) => {
+    const updated = await tx
+      .update(films)
+      .set({ title, updatedAt: new Date().toISOString() })
+      .where(and(eq(films.id, id), eq(films.year, year)))
+      .returning({ id: films.id })
+    if (!updated.length)
+      throw new FilmError(
+        'That film is no longer on the list. Please refresh.',
+        404
+      )
+  })
+}
+
 export async function reorderFilms(
   db: Database,
   requested: string[],
@@ -271,6 +290,30 @@ export async function reorderFilms(
         .update(films)
         .set({ position, updatedAt: now })
         .where(and(eq(films.id, id), eq(films.year, year)))
+  })
+}
+
+export async function removeFilm(
+  db: Database,
+  id: string,
+  year = currentYear()
+) {
+  return changeFilms(db, year, async (tx) => {
+    const removed = await tx
+      .delete(films)
+      .where(and(eq(films.id, id), eq(films.year, year)))
+      .returning({ id: films.id })
+    // A retry after a lost response must succeed without removing another film.
+    if (!removed.length) return
+    const remaining = await listFilms(tx, year)
+    const now = new Date().toISOString()
+    for (const [position, film] of remaining.entries()) {
+      if (film.position === position) continue
+      await tx
+        .update(films)
+        .set({ position, updatedAt: now })
+        .where(and(eq(films.id, film.id), eq(films.year, year)))
+    }
   })
 }
 

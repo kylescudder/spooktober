@@ -105,10 +105,11 @@ class RuntimeImage(unittest.TestCase):
 
         for statement in ("SELECT count(*) FROM public.films",
                           "INSERT INTO films (id,title,position,created_at,updated_at,year) VALUES ('t1','Halloween',0,'now','now',2026)",
-                          "UPDATE films SET watched=true, watched_at='now' WHERE id='t1'"):
+                          "UPDATE films SET watched=true, watched_at='now' WHERE id='t1'",
+                          "DELETE FROM films WHERE id='t1'"):
             result = self.runtime_sql(statement)
             self.assertEqual(result.returncode, 0, f'{statement}: {result.stderr}')
-        for statement in ("DELETE FROM films", "SELECT hash FROM drizzle.__drizzle_migrations",
+        for statement in ("SELECT hash FROM drizzle.__drizzle_migrations",
                           "DELETE FROM drizzle.__drizzle_migrations", "CREATE TABLE forbidden (id integer)"):
             result = self.runtime_sql(statement)
             self.assertNotEqual(result.returncode, 0, f'runtime role must not run: {statement}')
@@ -139,7 +140,8 @@ class RuntimeImage(unittest.TestCase):
         # The previous release reads its history after a rollback, but can't change it.
         runtime = lambda statement: legacy_sql(statement, RUNTIME, self.runtime_password)
         self.assertEqual(runtime('SELECT max(version) FROM schema_migrations').stdout.strip(), '2')
-        for statement in ("INSERT INTO schema_migrations (version) VALUES (3)", "DELETE FROM films",
+        self.assertEqual(runtime("DELETE FROM films WHERE id='kept'").returncode, 0)
+        for statement in ("INSERT INTO schema_migrations (version) VALUES (3)",
                           "SELECT hash FROM drizzle.__drizzle_migrations"):
             result = runtime(statement)
             self.assertIn('permission denied', result.stderr, statement)

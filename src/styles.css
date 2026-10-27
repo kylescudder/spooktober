@@ -407,6 +407,37 @@ h1 span {
   flex: 1;
   min-width: 0;
   padding: 7px 0;
+  overflow-wrap: anywhere;
+}
+.film-actions {
+  color: #b0a68e;
+  min-height: 44px;
+}
+.film-menu {
+  z-index: 50;
+  min-width: 160px;
+  padding: 5px;
+  border: 1px solid #514738;
+  border-radius: 8px;
+  background: #25251f;
+  box-shadow: 0 8px 24px #0006;
+}
+.film-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  cursor: pointer;
+  outline: none;
+}
+.film-menu-item[data-highlighted] {
+  background: #3a3327;
+}
+.remove-film-item {
+  color: #efac9d;
 }
 .is-watched .film-title {
   text-decoration: line-through;
@@ -497,6 +528,8 @@ h1 span {
   background: #25251f;
   border-color: #514738;
   border-radius: 12px;
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
 }
 .add-dialog h2 {
   color: #f0d9b9;
@@ -506,6 +539,7 @@ h1 span {
 }
 .add-dialog [data-slot='dialog-description'] {
   font-size: 0.875rem;
+  overflow-wrap: anywhere;
 }
 .input-label {
   display: block;

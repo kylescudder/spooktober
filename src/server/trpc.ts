@@ -3,17 +3,21 @@ import { initTRPC, TRPCError } from '@trpc/server'
 import { ZodError } from 'zod'
 import {
   addFilmSchema,
+  editFilmSchema,
   filmSchema,
   FilmError,
   orderSchema,
+  removeFilmSchema,
   setWatchedSchema
 } from '../lib/validation.ts'
 import { accessFailure } from './auth.ts'
 import {
   addFilm,
   database,
+  editFilm,
   listFilms,
   markWatched,
+  removeFilm,
   reorderFilms
 } from './database.ts'
 import { currentYear, seasonSchema } from '../lib/years.ts'
@@ -87,6 +91,18 @@ export const appRouter = t.router({
         storage(() =>
           markWatched(database(), input.id, input.watched, input.year)
         )
+      ),
+    edit: authenticated
+      .input(editFilmSchema.extend(seasonSchema.shape))
+      .output(filmSchema.array())
+      .mutation(({ input }) =>
+        storage(() => editFilm(database(), input.id, input.title, input.year))
+      ),
+    remove: authenticated
+      .input(removeFilmSchema.extend(seasonSchema.shape))
+      .output(filmSchema.array())
+      .mutation(({ input }) =>
+        storage(() => removeFilm(database(), input.id, input.year))
       ),
     reorder: authenticated
       .input(orderSchema.extend(seasonSchema.shape))

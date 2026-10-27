@@ -32,6 +32,8 @@ export const newIdSchema = z
     'Please send a valid new film identifier.'
   )
 export const addFilmSchema = z.object({ id: newIdSchema, title: titleSchema })
+export const editFilmSchema = z.object({ id: filmIdSchema, title: titleSchema })
+export const removeFilmSchema = z.object({ id: filmIdSchema })
 export const watchedSchema = z.object({
   watched: z.boolean({ error: 'Watched must be true or false.' })
 })

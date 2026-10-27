@@ -297,8 +297,10 @@ docker run --rm --read-only --network platform-db --env-file .env.migration \
   ghcr.io/kylescudder/spooktober@sha256:<digest> node database.cjs grant spooktober_runtime
 ```
 
-This gives `spooktober_runtime` read/insert/update on `films`, no access to the
-Drizzle migration journal (schema `drizzle`), and no delete or schema changes.
+This gives `spooktober_runtime` read/insert/update/delete on `films`, no access to the
+Drizzle migration journal (schema `drizzle`), and no schema changes.
+Film removal requires this updated grant; apply it before starting this release.
+The deployment hook runs it automatically, including when there are no new migrations.
 Databases from before Drizzle keep a read-only `schema_migrations`, so a rollback
 to those releases still starts.
 
