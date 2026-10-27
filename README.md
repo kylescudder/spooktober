@@ -30,7 +30,7 @@ compose.dev.yaml             # Local app and development PostgreSQL
 
 ## Sign-in with Clerk
 
-The Spooktober Clerk application has development and production instances, with accounts for **kyle@thescudders.org** and **rhiann@thescudders.org** in each. Both instances use email-code sign-in, with passwords, social sign-in and public registration disabled. Production is configured for **spooktober.kylescudder.co.uk**; see [Clerk configuration](deploy/README.md#clerk-configuration) for the existing instances and production DNS/certificate checks.
+The Spooktober Clerk application has development and production instances, with accounts for **kyle@thescudders.org** and **rhiann@thescudders.org** in each. Both instances use email-code sign-in, with passwords, social sign-in and public registration disabled. Production is configured for **spooktober.thescudders.org**; see [Clerk configuration](deploy/README.md#clerk-configuration) for the existing instances and production DNS/certificate checks.
 
 Save development keys and user IDs in private `.env`. The private `.env.clerk.production` holds production Clerk keys, production user IDs and `PUBLIC_URL`; merge it into the server's protected runtime configuration when deploying. It does not contain database credentials and the app does not load that filename automatically. Neither file is committed or included in Docker builds. On a fresh checkout, obtain these values privately from the existing Clerk application. The app permits one or two exact `user_...` IDs and rejects missing, malformed or duplicate entries. Production users have different IDs from development users.
 

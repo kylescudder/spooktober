@@ -28,7 +28,7 @@ Application-specific behavior is in `hooks.py`; deployment definitions are centr
 | ------------------ | ------------------------------------------------------------------------------ |
 | Checkout           | `/Users/kyle/platform/apps/spooktober`                                         |
 | Image repository   | `ghcr.io/kylescudder/spooktober`, public                                       |
-| App hostname       | `spooktober.kylescudder.co.uk`                                                 |
+| App hostname       | `spooktober.thescudders.org`                                                   |
 | App upstream       | `spooktober:8080` on `platform-web`                                            |
 | Database           | `spooktober`, private `postgres:5432` on internal `platform-db`                |
 | Database roles     | `spooktober_owner` for migrations and grants, `spooktober_runtime` for the app |
@@ -106,7 +106,7 @@ in `.env.migration`:
 | `CLERK_PUBLISHABLE_KEY`                       | Production instance's public `pk_live_...` key                         |
 | `CLERK_SECRET_KEY`                            | Same instance's private `sk_live_...` key                              |
 | `CLERK_ALLOWED_USER_IDS`                      | Kyle and Rhiann's exact production user IDs, comma separated           |
-| `PUBLIC_URL`                                  | `https://spooktober.kylescudder.co.uk`                                 |
+| `PUBLIC_URL`                                  | `https://spooktober.thescudders.org`                                   |
 | `PLATFORM_WEB_NETWORK`, `PLATFORM_DB_NETWORK` | `platform-web`, `platform-db`                                          |
 | `SPOOKTOBER_IMAGE`                            | Successfully deployed `ghcr.io/kylescudder/spooktober@sha256:<digest>` |
 
@@ -119,6 +119,22 @@ The image listens on `0.0.0.0:8080`, with a 256 MiB container limit, a 128 MiB
 JavaScript heap and four database connections. Its filesystem is read-only with
 a temporary `/tmp`; durable data lives in PostgreSQL. `/healthz` checks database
 connectivity and access to `films`, returning 200 or 503 without film data.
+
+## Canonical hostname
+
+Production moved to `https://spooktober.thescudders.org` on 27 October 2026.
+Herman's `PUBLIC_URL` and runtime Clerk publishable key use this origin and
+`clerk.spooktober.thescudders.org`. The existing Clerk production instance and
+user allow-list are retained. Clerk uses the secondary application domain
+configuration so its auth, account portal and email records stay scoped to
+`spooktober.thescudders.org`.
+
+The former `spooktober.kylescudder.co.uk` hostname remains registered to
+`spooktober-redirect:8080`. Herman's installed Compose configuration includes a
+small Caddy service using `deploy/redirect.Caddyfile` that sends permanent HTTP 308
+redirects to the new origin while preserving paths and query strings. Start
+that service when recovering the app's host configuration; it has no database
+network or published ports. The deploy webhook keeps its existing protected URL.
 
 ## Clerk configuration
 
@@ -143,16 +159,16 @@ The production CNAME records are listed below. Check them against the existing
 before changing DNS. Keep proxying off (**DNS only**) and verify DNS, TLS
 certificates and email-domain verification there before release.
 
-| Name                                           | Target                              |
-| ---------------------------------------------- | ----------------------------------- |
-| `clerk.spooktober.kylescudder.co.uk`           | `frontend-api.clerk.services`       |
-| `accounts.spooktober.kylescudder.co.uk`        | `accounts.clerk.services`           |
-| `clkmail.spooktober.kylescudder.co.uk`         | `mail.o5w90otf55dy.clerk.services`  |
-| `clk._domainkey.spooktober.kylescudder.co.uk`  | `dkim1.o5w90otf55dy.clerk.services` |
-| `clk2._domainkey.spooktober.kylescudder.co.uk` | `dkim2.o5w90otf55dy.clerk.services` |
+| Name                                         | Target                              |
+| -------------------------------------------- | ----------------------------------- |
+| `clerk.spooktober.thescudders.org`           | `frontend-api.clerk.services`       |
+| `accounts.spooktober.thescudders.org`        | `accounts.clerk.services`           |
+| `clkmail.spooktober.thescudders.org`         | `mail.94amzdakfy8l.clerk.services`  |
+| `clk._domainkey.spooktober.thescudders.org`  | `dkim1.94amzdakfy8l.clerk.services` |
+| `clk2._domainkey.spooktober.thescudders.org` | `dkim2.94amzdakfy8l.clerk.services` |
 
 The app needs outbound HTTPS/DNS to Clerk, and browsers must reach its Frontend
-API at `https://clerk.spooktober.kylescudder.co.uk`. Set `PUBLIC_URL` to the exact
+API at `https://clerk.spooktober.thescudders.org`. Set `PUBLIC_URL` to the exact
 external HTTPS origin for session and write-origin checks. After changing keys or
 allowed IDs, recreate the app and verify real login/logout for both people,
 expired sessions and denial of an uninvited account.
@@ -251,7 +267,7 @@ managed Caddy block:
 ```sh
 cd /Users/kyle/platform
 python3 -B scripts/hostname.py add spooktober-deploy deploy.kylescudder.co.uk --upstream spooktober-deploy-hook:9000 --path /hooks/spooktober
-python3 -B scripts/hostname.py add spooktober spooktober.kylescudder.co.uk --upstream spooktober:8080
+python3 -B scripts/hostname.py --settings caddy/cloudflare-thescudders.json add spooktober spooktober.thescudders.org --upstream spooktober:8080
 ```
 
 The hook's Caddy route returns 404 for every other path, including its private

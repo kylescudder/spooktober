@@ -127,13 +127,13 @@ jobs:
       contents: read
     environment:
       name: production
-      url: https://spooktober.kylescudder.co.uk
+      url: https://spooktober.thescudders.org
     concurrency:
       group: production
       cancel-in-progress: false
     env:
       DEPLOY_URL: https://deploy.kylescudder.co.uk/hooks/spooktober
-      HEALTH_URL: https://spooktober.kylescudder.co.uk/healthz
+      HEALTH_URL: https://spooktober.thescudders.org/healthz
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
