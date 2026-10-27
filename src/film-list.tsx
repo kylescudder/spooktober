@@ -35,8 +35,12 @@ import {
   LoaderCircle,
   RefreshCw,
   AlertCircle,
-  ChevronDown
+  ChevronDown,
+  MoreHorizontal,
+  Pencil,
+  Trash2
 } from 'lucide-react'
+import { DropdownMenu } from 'radix-ui'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
@@ -81,13 +85,17 @@ function FilmRow({
   index,
   next,
   disabled,
-  onWatched
+  onWatched,
+  onEdit,
+  onRemove
 }: {
   film: Film
   index: number
   next: boolean
   disabled: boolean
   onWatched: (film: Film, watched: boolean) => void
+  onEdit: (film: Film) => void
+  onRemove: (film: Film) => void
 }) {
   const {
     attributes,
@@ -140,6 +148,39 @@ function FilmRow({
       ) : next ? (
         <span className='next-label'>Up next</span>
       ) : null}
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger asChild>
+          <Button
+            variant='ghost'
+            size='icon'
+            className='film-actions'
+            aria-label={`Actions for ${film.title}`}
+            disabled={disabled}
+          >
+            <MoreHorizontal size={18} />
+          </Button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content
+            className='film-menu'
+            align='end'
+            sideOffset={4}
+          >
+            <DropdownMenu.Item
+              className='film-menu-item'
+              onSelect={() => onEdit(film)}
+            >
+              <Pencil size={15} /> Edit title
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              className='film-menu-item remove-film-item'
+              onSelect={() => onRemove(film)}
+            >
+              <Trash2 size={15} /> Remove film
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
     </li>
   )
 }
@@ -166,6 +207,8 @@ export function FilmList({
     optimistic?: OptimisticChange
   } | null>(null)
   const [addOpen, setAddOpen] = useState(false)
+  const [editingFilm, setEditingFilm] = useState<Film | null>(null)
+  const [removingFilm, setRemovingFilm] = useState<Film | null>(null)
   const [title, setTitle] = useState('')
   const [titleError, setTitleError] = useState<string | null>(null)
   const filmsRef = useRef(films)
@@ -403,6 +446,51 @@ export function FilmList({
   const watched = films.filter((film) => film.watched).length
   const next = films.find((film) => !film.watched)?.id
   const disabled = saving || !loaded || !hydrated
+  const editorRetryMatches = editingFilm
+    ? retry?.action.procedure === 'edit' &&
+      retry.action.input.id === editingFilm.id
+    : retry?.action.procedure === 'add'
+  const removalRetryMatches =
+    retry?.action.procedure === 'remove' &&
+    retry.action.input.id === removingFilm?.id
+
+  function openAdd() {
+    setEditingFilm(null)
+    setTitle('')
+    setTitleError(null)
+    setAddOpen(true)
+  }
+
+  function finishSave(action: SaveAction) {
+    if (action.procedure === 'add' || action.procedure === 'edit') {
+      setTitle('')
+      setAddOpen(false)
+      setEditingFilm(null)
+    } else if (action.procedure === 'remove') {
+      setRemovingFilm(null)
+    }
+  }
+
+  async function retrySave() {
+    if (retry && (await save(retry.action, retry.optimistic)))
+      finishSave(retry.action)
+  }
+
+  async function submitRemoval() {
+    if (!removingFilm) return
+    const action: SaveAction = {
+      procedure: 'remove',
+      input: { id: removingFilm.id }
+    }
+    if (
+      await save(action, (current) =>
+        current
+          .filter((film) => film.id !== removingFilm.id)
+          .map((film, position) => ({ ...film, position }))
+      )
+    )
+      finishSave(action)
+  }
 
   async function finishDrag(event: DragEndEvent) {
     draggingRef.current = false
@@ -436,15 +524,24 @@ export function FilmList({
       return
     }
     setTitleError(null)
+    const action: SaveAction = editingFilm
+      ? { procedure: 'edit', input: { id: editingFilm.id, title: name } }
+      : {
+          procedure: 'add',
+          input: { id: crypto.randomUUID(), title: name }
+        }
     if (
-      await save({
-        procedure: 'add',
-        input: { id: crypto.randomUUID(), title: name }
-      })
-    ) {
-      setTitle('')
-      setAddOpen(false)
-    }
+      await save(
+        action,
+        editingFilm
+          ? (current) =>
+              current.map((film) =>
+                film.id === editingFilm.id ? { ...film, title: name } : film
+              )
+          : undefined
+      )
+    )
+      finishSave(action)
   }
 
   return (
@@ -517,16 +614,7 @@ export function FilmList({
           <Button
             variant='ghost'
             disabled={saving}
-            onClick={() =>
-              retry
-                ? void save(retry.action, retry.optimistic).then((ok) => {
-                    if (ok && retry.action.procedure === 'add') {
-                      setTitle('')
-                      setAddOpen(false)
-                    }
-                  })
-                : void refresh(true)
-            }
+            onClick={() => (retry ? void retrySave() : void refresh(true))}
           >
             <RefreshCw size={14} /> Retry
           </Button>
@@ -547,10 +635,7 @@ export function FilmList({
           <Button
             className='add-button'
             disabled={disabled || dragging}
-            onClick={() => {
-              setTitleError(null)
-              setAddOpen(true)
-            }}
+            onClick={openAdd}
           >
             <Plus size={17} /> Add film
           </Button>
@@ -566,7 +651,7 @@ export function FilmList({
           <div className='empty-list'>
             <Clapperboard size={28} />
             <p>Our first fright is waiting.</p>
-            <Button onClick={() => setAddOpen(true)}>
+            <Button disabled={disabled} onClick={openAdd}>
               <Plus size={16} /> Add our first film
             </Button>
           </div>
@@ -603,6 +688,13 @@ export function FilmList({
                     onWatched={(item, value) => {
                       void markWatched(item, value)
                     }}
+                    onEdit={(item) => {
+                      setEditingFilm(item)
+                      setTitle(item.title)
+                      setTitleError(null)
+                      setAddOpen(true)
+                    }}
+                    onRemove={setRemovingFilm}
                   />
                 ))}
               </ol>
@@ -638,9 +730,13 @@ export function FilmList({
       >
         <DialogContent className='add-dialog'>
           <DialogHeader>
-            <DialogTitle>Add a film</DialogTitle>
+            <DialogTitle>
+              {editingFilm ? 'Edit film' : 'Add a film'}
+            </DialogTitle>
             <DialogDescription>
-              One more fright for our Halloween nights.
+              {editingFilm
+                ? `Update the title in our ${year} line-up.`
+                : 'One more fright for our Halloween nights.'}
             </DialogDescription>
           </DialogHeader>
           <form
@@ -670,10 +766,9 @@ export function FilmList({
                 {titleError}
               </p>
             )}
-            {error && (
+            {error && (!retry || editorRetryMatches) && (
               <p className='field-error' role='alert'>
-                {error} Close this dialog and use Retry to try the same save
-                again.
+                {error}
               </p>
             )}
             <DialogFooter>
@@ -685,16 +780,80 @@ export function FilmList({
               >
                 Cancel
               </Button>
-              <Button type='submit' disabled={saving || !!retry}>
+              {editorRetryMatches && (
+                <Button
+                  type='button'
+                  variant='outline'
+                  disabled={saving}
+                  onClick={() => void retrySave()}
+                >
+                  <RefreshCw size={16} /> Retry
+                </Button>
+              )}
+              <Button type='submit' disabled={saving || editorRetryMatches}>
                 {saving ? (
                   <LoaderCircle className='spin' size={16} />
+                ) : editingFilm ? (
+                  <Check size={16} />
                 ) : (
                   <Plus size={16} />
                 )}{' '}
-                Add film
+                {editingFilm ? 'Save changes' : 'Add film'}
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={removingFilm !== null}
+        onOpenChange={(open) => {
+          if (!open && !saving) setRemovingFilm(null)
+        }}
+      >
+        <DialogContent className='add-dialog'>
+          <DialogHeader>
+            <DialogTitle>Remove film?</DialogTitle>
+            <DialogDescription>
+              Remove “{removingFilm?.title}” from our {year} line-up? Its
+              watched progress will also be removed. This can’t be undone.
+            </DialogDescription>
+          </DialogHeader>
+          {error && (!retry || removalRetryMatches) && (
+            <p className='field-error' role='alert'>
+              {error}
+            </p>
+          )}
+          <DialogFooter>
+            <Button
+              variant='outline'
+              disabled={saving}
+              onClick={() => setRemovingFilm(null)}
+              autoFocus
+            >
+              Cancel
+            </Button>
+            {removalRetryMatches && (
+              <Button
+                variant='outline'
+                disabled={saving}
+                onClick={() => void retrySave()}
+              >
+                <RefreshCw size={16} /> Retry
+              </Button>
+            )}
+            <Button
+              variant='destructive'
+              disabled={saving || removalRetryMatches}
+              onClick={() => void submitRemoval()}
+            >
+              {saving ? (
+                <LoaderCircle className='spin' size={16} />
+              ) : (
+                <Trash2 size={16} />
+              )}{' '}
+              Remove film
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </main>

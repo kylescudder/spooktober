@@ -3,7 +3,8 @@
 Kyle and Rhiann's shared Halloween film watchlist. **TanStack Start + TanStack Router + React + TypeScript, tRPC, Zod and PostgreSQL.** One application lives in `src/`; one Node.js process renders the page and handles film changes.
 
 - Cosy pumpkin-and-candle styling, with phone and keyboard controls.
-- The current film list is rendered on the server; React handles dragging, checkboxes and adding films.
+- The current film list is rendered on the server; React handles dragging, checkboxes, adding films, title edits and confirmed removal.
+- Each film's actions menu offers **Edit title** and **Remove film**. Edits keep its place and watched date; removal updates progress and numbering for the selected year. Failed saves retain a retry, including removals whose response was lost.
 - The year picker defaults to the current calendar year. Each year's films, order and progress are separate; `?year=2026` links to a specific season and survives reloads. The picker includes 2020 through next year (and any year opened directly).
 - Clerk provides sign-in; only Kyle and Rhiann's configured user IDs can read or change films.
 - tRPC shares API input/output types with the client; Zod validates requests, responses and JSON imports.

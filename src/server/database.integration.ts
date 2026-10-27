@@ -13,6 +13,8 @@ import {
   listFilms,
   markWatched,
   migrateDatabase,
+  editFilm,
+  removeFilm,
   reorderFilms
 } from './database.ts'
 import { normalizeTimestamp, parseWatchlist } from './watchlist.ts'
@@ -312,6 +314,49 @@ test('JSON restore preserves nanoseconds, refuses overwrite and rolls back parti
   assert.deepEqual(await listFilms(clean), [])
 })
 
+test('edits and removals coordinate across pools without resurrecting films or losing additions', async (t) => {
+  const { pool, url, cleanup } = await testDatabase(t)
+  await migrateDatabase(pool)
+  const other = createDatabase(url.href)
+  cleanup.push(() => other.$client.end())
+  const year = 2040
+  const first = randomUUID(),
+    second = randomUUID(),
+    third = randomUUID()
+  await addFilm(pool, first, 'Halloween', year)
+  await addFilm(pool, second, 'Alien', year)
+  await markWatched(pool, second, true, year)
+  const original = await listFilms(pool, year)
+  await Promise.all([
+    removeFilm(pool, first, year),
+    editFilm(other, second, 'Alien (1979)', year),
+    addFilm(other, third, 'The Thing', year),
+    markWatched(pool, second, true, year)
+  ])
+  const result = await listFilms(other, year)
+  assert.deepEqual(
+    result.map(({ title, position, watched }) => ({
+      title,
+      position,
+      watched
+    })),
+    [
+      { title: 'Alien (1979)', position: 0, watched: true },
+      { title: 'The Thing', position: 1, watched: false }
+    ]
+  )
+  assert.equal(result[0].watchedAt, original[1].watchedAt)
+  assert.equal(result[0].createdAt, original[1].createdAt)
+  await assert.rejects(reorderFilms(pool, [first, second], year), {
+    status: 409
+  })
+  await assert.rejects(editFilm(pool, first, 'Deleted film', year), {
+    status: 404
+  })
+  assert.deepEqual(await removeFilm(pool, first, year), result)
+  assert.deepEqual(await listFilms(other, year), result)
+})
+
 test('tRPC transport validates inputs, requires auth and rejects unsafe requests', async (t) => {
   const { pool, url, cleanup } = await testDatabase(t)
   await migrateDatabase(pool)
@@ -382,6 +427,23 @@ test('tRPC transport validates inputs, requires auth and rejects unsafe requests
     }),
     /Enter a film title/
   )
+  const beforeEdit = (await client.films.list.query())[0]
+  const edited = await client.films.edit.mutate({
+    id,
+    title: ' The Thing (1982) ',
+    year: new Date().getFullYear()
+  })
+  assert.deepEqual(edited[0], {
+    ...beforeEdit,
+    title: 'The Thing (1982)',
+    updatedAt: edited[0].updatedAt
+  })
+  assert.deepEqual(await client.films.list.query(), edited)
+  for (const title of [' ', 'x'.repeat(201), 'bad\0title'])
+    await assert.rejects(
+      client.films.edit.mutate({ id, title, year: new Date().getFullYear() }),
+      /Enter a film title/
+    )
   await assert.rejects(
     client.films.reorder.mutate({
       ids: [id, id],
@@ -405,6 +467,12 @@ test('tRPC transport validates inputs, requires auth and rejects unsafe requests
     /no longer on the list/
   )
   await assert.rejects(
+    client.films.edit.mutate({ id, title: 'Wrong year', year: nextYear }),
+    /no longer on the list/
+  )
+  await client.films.remove.mutate({ id, year: nextYear })
+  assert.equal((await client.films.list.query())[0].title, 'The Thing (1982)')
+  await assert.rejects(
     client.films.reorder.mutate({ ids: [id], year: nextYear }),
     /list has changed/
   )
@@ -417,6 +485,26 @@ test('tRPC transport validates inputs, requires auth and rejects unsafe requests
     })
   )
   const beforeDenied = await listFilms(pool)
+  userId = null
+  for (const user of [null, 'user_SomeoneElse']) {
+    userId = user
+    await assert.rejects(
+      client.films.edit.mutate({
+        id,
+        title: 'Forbidden',
+        year: new Date().getFullYear()
+      }),
+      (error: unknown) =>
+        (error as { meta?: { response?: Response } }).meta?.response?.status ===
+        (user === null ? 401 : 403)
+    )
+    await assert.rejects(
+      client.films.remove.mutate({ id, year: new Date().getFullYear() }),
+      (error: unknown) =>
+        (error as { meta?: { response?: Response } }).meta?.response?.status ===
+        (user === null ? 401 : 403)
+    )
+  }
   userId = null
   const denied = await trpcHandler(
     new Request('http://localhost/api/trpc/films.list', {
@@ -463,6 +551,21 @@ test('tRPC transport validates inputs, requires auth and rejects unsafe requests
   )
   assert.equal((await trpcHandler(post('{'))).status, 400)
   assert.equal((await trpcHandler(post('x'.repeat(17000)))).status, 413)
+  const year = new Date().getFullYear()
+  const removed = await client.films.remove.mutate({ id, year })
+  assert.equal(removed.length, 20)
+  assert.ok(removed.every((film) => film.id !== id))
+  assert.deepEqual(
+    removed.map((film) => film.position),
+    Array.from({ length: 20 }, (_, i) => i)
+  )
+  assert.deepEqual(await client.films.remove.mutate({ id, year }), removed)
+  assert.deepEqual(await client.films.list.query(), removed)
+  await assert.rejects(
+    client.films.edit.mutate({ id, title: 'Gone', year }),
+    /no longer on the list/
+  )
+  assert.equal((await client.films.list.query({ year: nextYear })).length, 1)
 })
 
 test('a restricted runtime role can save films but cannot create schema or alter migration history', async (t) => {
@@ -488,10 +591,14 @@ test('a restricted runtime role can save films but cannot create schema or alter
   await addFilm(runtime, id, 'Runtime film')
   await markWatched(runtime, id, true)
   await reorderFilms(runtime, [id])
+  const edited = await editFilm(runtime, id, 'Renamed runtime film')
+  assert.equal(edited[0].title, 'Renamed runtime film')
+  const removed = await removeFilm(runtime, id)
+  assert.equal(removed.length, 20)
+  assert.ok(removed.every((film) => film.id !== id))
   await assert.rejects(
     runtime.$client.unsafe('CREATE TABLE forbidden (id integer)')
   )
-  await assert.rejects(runtime.$client.unsafe('DELETE FROM films'))
   await assert.rejects(
     runtime.$client.unsafe('SELECT hash FROM drizzle.__drizzle_migrations')
   )
