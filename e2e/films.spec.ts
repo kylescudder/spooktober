@@ -258,3 +258,124 @@ test('keyboard actions support editing, cancellation and adding afterwards; long
   ).toBe(true)
   await page.getByRole('button', { name: 'Cancel', exact: true }).click()
 })
+
+test('a failed removal is offered only in the confirmation for the same film', async ({
+  page
+}, info) => {
+  const year = info.project.name === 'desktop' ? 2085 : 2185
+  await page.goto(`${base}/?year=${year}`)
+  await add(page, 'Halloween')
+  await add(page, 'Alien')
+  await action(page, 'Halloween', 'Remove film')
+  await page.route('**/api/trpc/films.remove*', (route) => route.abort(), {
+    times: 1
+  })
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: 'Remove film', exact: true }).click()
+  await expect(dialog.getByRole('alert')).toContainText(
+    'temporarily unavailable'
+  )
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  await action(page, 'Alien', 'Remove film')
+  await expect(dialog).toContainText('Remove “Alien”')
+  await expect(
+    dialog.getByRole('button', { name: 'Retry', exact: true })
+  ).toHaveCount(0)
+  await expect(dialog.getByRole('alert')).toHaveCount(0)
+  await expect(
+    dialog.getByRole('button', { name: 'Remove film', exact: true })
+  ).toBeEnabled()
+  await page.screenshot({
+    path: `artifacts/film-retry-feedback/${info.project.name}-confirm-alien.png`,
+    animations: 'disabled',
+    fullPage: true
+  })
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  // Cancelling a different confirmation preserves the original, correctly scoped retry.
+  await action(page, 'Halloween', 'Remove film')
+  await expect(
+    dialog.getByRole('button', { name: 'Retry', exact: true })
+  ).toBeVisible()
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  await action(page, 'Alien', 'Remove film')
+  await dialog.getByRole('button', { name: 'Remove film', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  await page.reload()
+  await expect(page.locator('.film-row')).toHaveCount(1)
+  await expect(page.locator('.film-row')).toContainText('Halloween')
+})
+
+for (const [index, scenario] of [
+  { failed: 'remove', target: 'edit same film' },
+  { failed: 'edit', target: 'edit another film' },
+  { failed: 'edit', target: 'add a film' }
+].entries()) {
+  test(`a failed ${scenario.failed} cannot be retried from ${scenario.target}`, async ({
+    page
+  }, info) => {
+    const year = (info.project.name === 'desktop' ? 2086 : 2186) + index
+    await page.goto(`${base}/?year=${year}`)
+    await add(page, 'Halloween')
+    await add(page, 'Alien')
+    await action(
+      page,
+      'Halloween',
+      scenario.failed === 'edit' ? 'Edit title' : 'Remove film'
+    )
+    const dialog = page.getByRole('dialog')
+    if (scenario.failed === 'edit')
+      await page
+        .getByRole('textbox', { name: 'Film title' })
+        .fill('Halloween (1978)')
+    await page.route(
+      `**/api/trpc/films.${scenario.failed}*`,
+      (route) => route.abort(),
+      { times: 1 }
+    )
+    await dialog
+      .getByRole('button', {
+        name: scenario.failed === 'edit' ? 'Save changes' : 'Remove film',
+        exact: true
+      })
+      .click()
+    await expect(dialog.getByRole('alert')).toContainText(
+      'temporarily unavailable'
+    )
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(dialog).toHaveCount(0)
+
+    const adding = scenario.target === 'add a film'
+    if (adding)
+      await page.getByRole('button', { name: 'Add film', exact: true }).click()
+    else
+      await action(
+        page,
+        scenario.target === 'edit same film' ? 'Halloween' : 'Alien',
+        'Edit title'
+      )
+    await expect(
+      dialog.getByRole('button', { name: 'Retry', exact: true })
+    ).toHaveCount(0)
+    await expect(dialog.getByRole('alert')).toHaveCount(0)
+    const submit = dialog.getByRole('button', {
+      name: adding ? 'Add film' : 'Save changes',
+      exact: true
+    })
+    await expect(submit).toBeEnabled()
+    await page.getByRole('textbox', { name: 'Film title' }).fill('The Thing')
+    await submit.click()
+    await expect(dialog).toHaveCount(0)
+    await page.reload()
+    await expect(page.locator('.film-row')).toHaveCount(adding ? 3 : 2)
+    const expected =
+      scenario.target === 'edit same film'
+        ? ['The Thing', 'Alien']
+        : adding
+          ? ['Halloween', 'Alien', 'The Thing']
+          : ['Halloween', 'The Thing']
+    await expect(page.locator('.film-title')).toHaveText(expected)
+  })
+}

@@ -446,6 +446,13 @@ export function FilmList({
   const watched = films.filter((film) => film.watched).length
   const next = films.find((film) => !film.watched)?.id
   const disabled = saving || !loaded || !hydrated
+  const editorRetryMatches = editingFilm
+    ? retry?.action.procedure === 'edit' &&
+      retry.action.input.id === editingFilm.id
+    : retry?.action.procedure === 'add'
+  const removalRetryMatches =
+    retry?.action.procedure === 'remove' &&
+    retry.action.input.id === removingFilm?.id
 
   function openAdd() {
     setEditingFilm(null)
@@ -759,7 +766,7 @@ export function FilmList({
                 {titleError}
               </p>
             )}
-            {error && (
+            {error && (!retry || editorRetryMatches) && (
               <p className='field-error' role='alert'>
                 {error}
               </p>
@@ -773,7 +780,7 @@ export function FilmList({
               >
                 Cancel
               </Button>
-              {retry && (
+              {editorRetryMatches && (
                 <Button
                   type='button'
                   variant='outline'
@@ -783,7 +790,7 @@ export function FilmList({
                   <RefreshCw size={16} /> Retry
                 </Button>
               )}
-              <Button type='submit' disabled={saving || !!retry}>
+              <Button type='submit' disabled={saving || editorRetryMatches}>
                 {saving ? (
                   <LoaderCircle className='spin' size={16} />
                 ) : editingFilm ? (
@@ -811,7 +818,7 @@ export function FilmList({
               watched progress will also be removed. This can’t be undone.
             </DialogDescription>
           </DialogHeader>
-          {error && (
+          {error && (!retry || removalRetryMatches) && (
             <p className='field-error' role='alert'>
               {error}
             </p>
@@ -825,7 +832,7 @@ export function FilmList({
             >
               Cancel
             </Button>
-            {retry && (
+            {removalRetryMatches && (
               <Button
                 variant='outline'
                 disabled={saving}
@@ -836,7 +843,7 @@ export function FilmList({
             )}
             <Button
               variant='destructive'
-              disabled={saving || !!retry}
+              disabled={saving || removalRetryMatches}
               onClick={() => void submitRemoval()}
             >
               {saving ? (
