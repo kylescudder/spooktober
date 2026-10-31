@@ -25,6 +25,7 @@ test('health deadlines stop SQL, preserve the pool and recover', async () => {
   process.env.DATABASE_URL = proxy.url
   process.env.SPOOKTOBER_REVISION = 'health-test'
   const app = database()
+  assert.equal(database(), app)
   const { healthResponse } = await import('./health.ts')
   try {
     await migrateDatabase(owner)
@@ -33,8 +34,34 @@ test('health deadlines stop SQL, preserve the pool and recover', async () => {
     try {
       await lock`BEGIN`
       await lock`LOCK TABLE films IN ACCESS EXCLUSIVE MODE`
-      const responses = await Promise.all(
+      const started = Date.now()
+      const pending = Promise.all(
         Array.from({ length: 8 }, () => healthResponse())
+      )
+      const probeDeadline = Date.now() + 1500
+      for (;;) {
+        const [activity] = await owner.$client`SELECT count(*)::int AS active
+          FROM pg_stat_activity WHERE datname = ${name} AND pid <> pg_backend_pid()
+          AND state = 'active' AND query ILIKE '%FROM films LIMIT 0%'`
+        if (activity!.active > 0) {
+          assert.equal(
+            activity!.active,
+            1,
+            'Concurrent health calls share one dedicated connection'
+          )
+          break
+        }
+        assert.ok(
+          Date.now() < probeDeadline,
+          'The health query must reach PostgreSQL'
+        )
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
+      const responses = await pending
+      const elapsed = Date.now() - started
+      assert.ok(
+        elapsed >= 2500 && elapsed < 4500,
+        `Health must retain its 3-second deadline (took ${elapsed} ms)`
       )
       for (const response of responses) {
         assert.equal(response.status, 503)

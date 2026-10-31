@@ -30,8 +30,8 @@ export function databaseConfig(
     return {
       url: DATABASE_URL,
       max,
-      connect_timeout: 5,
-      idle_timeout: 300,
+      connect_timeout: 10,
+      idle_timeout: 20,
       max_lifetime: 1800,
       onnotice: () => {},
       connection: {

@@ -385,7 +385,15 @@ one-connection client instead of importing the application pool. This leaves
 two slots for operator connections during a release; owner migrations use a
 separate role.
 
-CI exercises the real deployment client against an eight-connection test role,
+The shared application client retires idle connections after 20 seconds and
+allows 10 seconds to connect. It retains the 30-minute maximum lifetime,
+10-second statement timeout, 5-second lock timeout, UTC and `public` search path.
+Health uses a separate one-connection client with its own 3-second connection,
+statement and response deadlines; failed probes retire it without touching the
+application pool. No role-limit or installed deployment-hook changes are needed
+for this policy.
+
+CI exercises the real application and deployment clients against an eight-connection test role,
 with all four application slots held open. Concurrent deployment queries must
 share one backend, health must still connect, two spare slots must remain usable,
 and a ninth connection must be rejected by PostgreSQL.
