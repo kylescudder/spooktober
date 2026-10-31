@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process'
 import { createTRPCClient, httpBatchLink } from '@trpc/client'
 import {
   addFilm,
+  databaseConfig,
   createDatabase,
   type Database,
   grantRuntimeAccess,
@@ -44,6 +45,64 @@ async function testDatabase(t: TestContext) {
 }
 
 const seed = async () => parseWatchlist(await readFile('src/seed.json'))
+
+test('database clients retain bounded connection and session safeguards', async (t) => {
+  const { pool, url } = await testDatabase(t)
+  const options = databaseConfig(url.href)
+  assert.equal(options.max, 4)
+  assert.equal(options.connect_timeout, 10)
+  assert.equal(options.idle_timeout, 20)
+  assert.equal(options.max_lifetime, 1800)
+  const [settings] = await pool.$client`SELECT
+    current_setting('statement_timeout') AS statement_timeout,
+    current_setting('lock_timeout') AS lock_timeout,
+    current_setting('TimeZone') AS timezone,
+    current_setting('search_path') AS search_path`
+  assert.deepEqual(
+    { ...settings },
+    {
+      statement_timeout: '10s',
+      lock_timeout: '5s',
+      timezone: 'UTC',
+      search_path: 'public'
+    }
+  )
+})
+
+test(
+  'idle application connections retire and reconnect without losing annual films',
+  { timeout: 30000 },
+  async (t) => {
+    const { pool, control } = await testDatabase(t)
+    await migrateDatabase(pool)
+    const id = randomUUID()
+    await addFilm(pool, id, 'Halloween', 2026)
+    await markWatched(pool, id, true, 2026)
+    const before = await listFilms(pool, 2026)
+    const [backend] = await pool.$client`SELECT pg_backend_pid() AS pid`
+    const started = Date.now()
+    const deadline = started + 25000
+    // Observe from a separate client: querying the app would restart its idle timer.
+    for (;;) {
+      const [activity] = await control.$client`SELECT count(*)::int AS connected
+      FROM pg_stat_activity WHERE pid = ${backend!.pid}`
+      if (activity!.connected === 0) break
+      assert.ok(
+        Date.now() < deadline,
+        'The application connection must retire after 20 idle seconds'
+      )
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    assert.ok(
+      Date.now() - started >= 19000,
+      'Do not retire idle application connections early'
+    )
+    assert.deepEqual(await listFilms(pool, 2026), before)
+    assert.deepEqual(await listFilms(pool, 2027), [])
+    const [reconnected] = await pool.$client`SELECT pg_backend_pid() AS pid`
+    assert.notEqual(reconnected!.pid, backend!.pid)
+  }
+)
 
 test('deployment CLI exports and restores every season when the current year is empty', async (t) => {
   const { pool, url } = await testDatabase(t)

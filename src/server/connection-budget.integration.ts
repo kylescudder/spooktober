@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 import { createDeploymentDatabase } from './deployment-database.ts'
+import { createDatabase } from './database.ts'
 import postgres from 'postgres'
 function connect(url: string, max: number) {
   return adapt(postgres(url, { max, connect_timeout: 3, onnotice: () => {} }))
@@ -59,12 +60,19 @@ async function checkBudget() {
     const url = new URL(controlUrl)
     url.username = role
     url.password = ''
-    const app = connect(url.toString(), 4)
+    const app = adapt(createDatabase(url.toString()).$client)
     const deployment = adapt(createDeploymentDatabase(url.toString()).$client)
     const health = connect(url.toString(), 1)
     const spare = connect(url.toString(), 2)
     const overflow = connect(url.toString(), 1)
     pools.push(app, deployment, health, spare, overflow)
+    // Exercise the real application factory under load, not a lookalike test pool.
+    const appRows = await Promise.all(
+      Array.from({ length: 12 }, () =>
+        app.query('SELECT pg_backend_pid() AS pid, pg_sleep(0.05)')
+      )
+    )
+    assert.equal(new Set(appRows.map(([row]) => row!.pid)).size, 4)
     // Hold every application slot, rather than relying on a quiet test pool.
     for (let i = 0; i < 4; i++) {
       const connection = await app.reserve()
