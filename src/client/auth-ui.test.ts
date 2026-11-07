@@ -76,76 +76,73 @@ before(async () => {
     originalGlobals.set(key, Object.getOwnPropertyDescriptor(globalThis, key))
     Object.defineProperty(globalThis, key, { configurable: true, value })
   }
-  globalThis.fetch = Object.assign(
-    async (
-      input: Parameters<typeof fetch>[0],
-      init?: Parameters<typeof fetch>[1]
-    ) => {
-      const url = new URL(
-        typeof input === 'string'
-          ? input
-          : input instanceof URL
-            ? input.href
-            : input.url,
-        browser.location.origin
-      )
-      if (url.pathname === '/api/auth/update-user') {
-        profileSave = JSON.parse(init?.body as string)
-        profileState = { ...profileState, ...(profileSave as Partial<Profile>) }
-        return Response.json({ status: true })
-      }
-      if (url.pathname === '/api/auth/get-session') {
-        sessionRequests++
-        if (delaySession)
-          await new Promise<void>((resolve) => {
-            releaseSession = resolve
-          })
-        return Response.json(
-          profileSession
-            ? {
-                user: {
-                  ...profileState,
-                  id: profileUserId,
-                  createdAt: '2026-01-01T00:00:00Z',
-                  updatedAt: '2026-01-01T00:00:00Z'
-                },
-                session: {
-                  id: 'disposable-session',
-                  userId: profileUserId,
-                  expiresAt: '2030-01-01T00:00:00Z',
-                  createdAt: '2026-01-01T00:00:00Z',
-                  updatedAt: '2026-01-01T00:00:00Z'
-                }
+  globalThis.fetch = (async (
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1]
+  ) => {
+    const url = new URL(
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url,
+      browser.location.origin
+    )
+    if (url.pathname === '/api/auth/update-user') {
+      profileSave = JSON.parse(init?.body as string)
+      profileState = { ...profileState, ...(profileSave as Partial<Profile>) }
+      return Response.json({ status: true })
+    }
+    if (url.pathname === '/api/auth/get-session') {
+      sessionRequests++
+      if (delaySession)
+        await new Promise<void>((resolve) => {
+          releaseSession = resolve
+        })
+      return Response.json(
+        profileSession
+          ? {
+              user: {
+                ...profileState,
+                id: profileUserId,
+                createdAt: '2026-01-01T00:00:00Z',
+                updatedAt: '2026-01-01T00:00:00Z'
+              },
+              session: {
+                id: 'disposable-session',
+                userId: profileUserId,
+                expiresAt: '2030-01-01T00:00:00Z',
+                createdAt: '2026-01-01T00:00:00Z',
+                updatedAt: '2026-01-01T00:00:00Z'
               }
-            : null
-        )
-      }
-      if (url.pathname === '/api/auth/email-otp/send-verification-otp') {
-        sends++
-        lastSend = JSON.parse(init?.body as string)
-        return sendFails
-          ? Response.json(
-              { code: 'SEND_FAILED', message: 'Unable to send a code' },
-              { status: 500 }
-            )
-          : Response.json({ success: true })
-      }
-      if (url.pathname === '/api/auth/sign-in/email-otp') {
-        lastVerify = JSON.parse(init?.body as string)
-        return signInFails
-          ? Response.json(
-              { code: 'INVALID_OTP', message: 'Invalid code' },
-              { status: 400 }
-            )
-          : Response.json({
-              user: { emailVerified: true },
-              token: 'disposable-test-token'
-            })
-      }
-      throw new Error('Unexpected test request: ' + url.pathname)
-    },
-    { preconnect: originalFetch.preconnect }
-  ) as typeof fetch
+            }
+          : null
+      )
+    }
+    if (url.pathname === '/api/auth/email-otp/send-verification-otp') {
+      sends++
+      lastSend = JSON.parse(init?.body as string)
+      return sendFails
+        ? Response.json(
+            { code: 'SEND_FAILED', message: 'Unable to send a code' },
+            { status: 500 }
+          )
+        : Response.json({ success: true })
+    }
+    if (url.pathname === '/api/auth/sign-in/email-otp') {
+      lastVerify = JSON.parse(init?.body as string)
+      return signInFails
+        ? Response.json(
+            { code: 'INVALID_OTP', message: 'Invalid code' },
+            { status: 400 }
+          )
+        : Response.json({
+            user: { emailVerified: true },
+            token: 'disposable-test-token'
+          })
+    }
+    throw new Error('Unexpected test request: ' + url.pathname)
+  }) as unknown as typeof fetch
   ;({ createRoot } = await import('react-dom/client'))
   ;({ EmailOtp } = await import('../components/auth/email-otp/email-otp'))
   ;({ SignIn } = await import('../components/auth/sign-in'))
