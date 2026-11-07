@@ -9,5 +9,5 @@ export async function loadWatchlistPage({ data }: { data: { year?: number } }) {
   } catch {
     /* The UI exposes retry. */
   }
-  return { configured: true, films, year }
+  return { configured: true, provider: 'clerk' as const, films, year }
 }

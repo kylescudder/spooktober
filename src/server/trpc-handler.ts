@@ -1,14 +1,22 @@
 import '@tanstack/react-start/server-only'
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch'
-import { accessFailure, guardMutationRequest, privateHeaders } from './auth.ts'
+import {
+  accessFailure,
+  guardMutationRequest,
+  privateHeaders,
+  type Viewer
+} from './auth.ts'
 import { appRouter } from './trpc.ts'
 
-// The TanStack Start route supplies Clerk's server session resolver. Tests can exercise
-// transport and access policy without a live Clerk account or an auth bypass.
-export function createTrpcHandler(resolveUserId: () => Promise<string | null>) {
+// The TanStack Start route supplies the selected provider's server session
+// resolver. Tests can exercise transport and access policy without a live
+// Clerk account or an auth bypass.
+export function createTrpcHandler(
+  resolveViewer: (request: Request) => Promise<Viewer>
+) {
   return async function trpcHandler(request: Request): Promise<Response> {
-    const userId = await resolveUserId()
-    const failure = accessFailure(userId)
+    const viewer = await resolveViewer(request)
+    const failure = accessFailure(viewer)
     if (failure)
       return Response.json(
         { error: failure.error },
@@ -53,7 +61,7 @@ export function createTrpcHandler(resolveUserId: () => Promise<string | null>) {
       endpoint: '/api/trpc',
       req: request,
       router: appRouter,
-      createContext: () => ({ userId }),
+      createContext: () => ({ viewer }),
       responseMeta: () => ({ headers: privateHeaders })
     })
   }

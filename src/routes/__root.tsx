@@ -7,11 +7,11 @@ import {
   Scripts
 } from '@tanstack/react-router'
 import { AuthMessage } from '../components/auth-message'
-import { loadClerkConfiguration } from '../lib/page-data'
+import { loadAuthConfiguration } from '../lib/page-data'
 import appCss from '../styles.css?url'
 
 export const Route = createRootRoute({
-  beforeLoad: async () => ({ clerk: await loadClerkConfiguration() }),
+  beforeLoad: async () => ({ auth: await loadAuthConfiguration() }),
   head: () => ({
     meta: [
       { charSet: 'utf-8' },
@@ -44,11 +44,12 @@ export const Route = createRootRoute({
 })
 
 function Root() {
-  const { clerk } = Route.useRouteContext()
-  if (!clerk.configured) return <Outlet />
+  const { auth } = Route.useRouteContext()
+  // Better Auth pages mount their own UI provider; Clerk wraps the whole app.
+  if (auth.provider !== 'clerk' || !auth.configured) return <Outlet />
   return (
     <ClerkProvider
-      publishableKey={clerk.publishableKey}
+      publishableKey={auth.publishableKey}
       signInUrl='/sign-in'
       signUpUrl='/sign-in'
       signInForceRedirectUrl='/'

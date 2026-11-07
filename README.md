@@ -40,6 +40,8 @@ Missing keys show a setup message and deny film API access. There is no Basic Au
 
 See [runtime configuration](deploy/README.md#runtime-configuration) and [Clerk configuration](deploy/README.md#clerk-configuration) before production release.
 
+Self-hosted [Better Auth](https://www.better-auth.com) is available behind `AUTH_PROVIDER=better-auth` (email code, magic link, password and passkey for the emails in `AUTH_ALLOWED_EMAILS`). Clerk remains the default and the rollback; see [Better Auth rollout and Clerk rollback](deploy/README.md#better-auth-rollout-and-clerk-rollback).
+
 ## Run locally with Docker
 
 On a fresh checkout, copy `.env.example` to `.env` and configure Clerk as described below. Preserve an existing private `.env`. The local Compose file supplies a development-only PostgreSQL connection and clears `PUBLIC_URL` for localhost.

@@ -173,6 +173,85 @@ external HTTPS origin for session and write-origin checks. After changing keys o
 allowed IDs, recreate the app and verify real login/logout for both people,
 expired sessions and denial of an uninvited account.
 
+## Better Auth rollout and Clerk rollback
+
+`AUTH_PROVIDER` selects exactly one sign-in provider for the server and the
+rendered pages. It defaults to `clerk`, so this release changes nothing until
+it is switched. With `clerk`, every `/api/auth/*` path answers 404 and the
+Clerk pages, middleware and allow-list work as before. Changing provider means
+recreating the app container; the process environment is not hot-swapped.
+
+The owner migration `0001_better_auth` only adds `auth_user`, `auth_session`,
+`auth_account`, `auth_verification`, `auth_passkey`, `auth_rate_limit` and
+`auth_email_limit`, and the runtime grant now covers them. Films are shared
+between Kyle and Rhiann and are not keyed by user ID, so no film data changes
+and no Clerk user linking is needed: access is decided by the email allow-list.
+
+Prepare these settings in the host's protected runtime configuration, keeping
+the Clerk keys and `CLERK_ALLOWED_USER_IDS` for rollback:
+
+```dotenv
+AUTH_PROVIDER=clerk
+BETTER_AUTH_URL=https://spooktober.thescudders.org
+BETTER_AUTH_SECRET=<stable, cryptographically random app-specific secret, 32+ characters>
+BREVO_API_KEY=<Spooktober transactional API key>
+AUTH_EMAIL_FROM=<verified Brevo sender on thescudders.org>
+AUTH_EMAIL_DAILY_LIMIT=40
+AUTH_ALLOWED_EMAILS=kyle@thescudders.org,rhiann@thescudders.org
+```
+
+These are required only when `better-auth` is selected; a missing or invalid
+value then shows the setup message and refuses the film API, and error messages
+name settings, never values. `BETTER_AUTH_URL` must be HTTPS in production and is
+also the passkey RP ID (its hostname) and origin. Keep the secret stable across
+releases and out of Git, image layers and CI.
+
+Cutover: deploy the image through the central service (owner migrations run as
+usual), confirm the Clerk site still works, then set `AUTH_PROVIDER=better-auth`
+and recreate only the app service with the same image. Each person signs in once
+with an email code or magic link, which creates their account; a password can
+then be set from Profile. Verify sign-in for both people, an uninvited address
+getting no email, the watchlist and sign-out.
+
+Sign-in lives at `/auth/<view>` and offers four methods that link to each other:
+password (`/auth/sign-in`), email code (`/auth/email-otp`), magic link
+(`/auth/magic-link`) and passkey, plus `/auth/forgot-password` and
+`/auth/reset-password`. They use the official Better Auth UI shadcn components,
+styled with the watchlist's colours. Every method returns to the watchlist, or a
+same-site `?redirectTo=` path such as `/profile`. `/auth/sign-up` redirects to
+sign-in; there is no sign-up, and the Clerk `/sign-in` page redirects to
+`/auth/sign-in`.
+
+Access needs a session whose email is verified and still in
+`AUTH_ALLOWED_EMAILS`, checked on every page load and tRPC call: removing an
+address revokes its existing sessions' access on the next request. Accounts are
+created only for allowlisted addresses. Email codes are six digits, valid once
+for ten minutes with five attempts, and stored as a keyed HMAC. Magic links (10
+minutes, stored hashed) and password reset links (30 minutes) are single-use.
+Passwords are 12–128 characters, and a reset signs out other sessions. Mail goes
+only to allowlisted addresses; everyone else gets the same success response.
+Persistent limits: one email per recipient a minute and five an hour, an app-wide
+budget of `AUTH_EMAIL_DAILY_LIMIT` per rolling day, and per-IP limits on every
+auth endpoint (keyed on Cloudflare's `CF-Connecting-IP`). Emailed links and
+redirects must stay on this site. The app forwards only the Better Auth
+endpoints it uses; sign-up, account deletion, email change and email-code
+password reset answer 404.
+
+Signed-in viewers get an avatar menu with Profile and Sign out. `/profile` has a
+display name, optional first and last names, the read-only verified email, set or
+change password, passkeys and sign out. There are no profile photos (nowhere
+private to keep them). The email-code form survives a phone switching to the mail
+app: tab-scoped storage keeps only the email and request time for ten minutes,
+never the code.
+
+Emails are sent by Brevo's HTTP API (8 second timeout) with a branded layout and
+`/email-logo.png`; provider responses, codes, links and keys are never logged.
+Brevo's free plan adds a `List-Unsubscribe` header to transactional mail.
+
+To roll back, set `AUTH_PROVIDER=clerk` and recreate the app service with the
+same image. Keep the Clerk application, keys, DNS and allowed user IDs. Leave the
+additive auth tables in place; never restore an older database to change provider.
+
 ## Install and operate
 
 From the checkout, with private configuration already installed:

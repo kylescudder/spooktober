@@ -93,8 +93,22 @@ export async function migrateDatabase(db: Database) {
 
 const roleName = /^[a-z_][a-z0-9_]{0,62}$/
 
-// The app's login may only read and write the watchlist; it can neither see
-// migration history or change schema. Run as the owner after every migration.
+// Better Auth's additive tables. The runtime reads and writes them (sessions,
+// codes, rate limits) only when AUTH_PROVIDER=better-auth, but is granted
+// access in every release so switching provider needs no database change.
+export const authTables = [
+  'auth_user',
+  'auth_session',
+  'auth_account',
+  'auth_verification',
+  'auth_passkey',
+  'auth_rate_limit',
+  'auth_email_limit'
+] as const
+
+// The app's login may only read and write the watchlist and sign-in tables; it
+// can neither see migration history or change schema. Run as the owner after
+// every migration.
 export async function grantRuntimeAccess(db: Database, role: string) {
   if (!roleName.test(role))
     throw new Error(
@@ -115,6 +129,10 @@ export async function grantRuntimeAccess(db: Database, role: string) {
     await tx.execute(
       sql`GRANT SELECT, INSERT, UPDATE, DELETE ON public.films TO ${login}`
     )
+    for (const table of authTables)
+      await tx.execute(
+        sql`GRANT SELECT, INSERT, UPDATE, DELETE ON public.${sql.identifier(table)} TO ${login}`
+      )
     if (tables!.journal)
       await tx.execute(sql`REVOKE ALL ON SCHEMA drizzle FROM ${login}`)
     // The previous release reads its history table; keep that read-only grant
@@ -134,6 +152,12 @@ export async function grantRuntimeAccess(db: Database, role: string) {
       AND has_table_privilege(${role}, 'public.films', 'INSERT')
       AND has_table_privilege(${role}, 'public.films', 'UPDATE')
       AND has_table_privilege(${role}, 'public.films', 'DELETE')
+      AND (SELECT bool_and(has_table_privilege(${role}, 'public.' || name, privilege))
+        FROM unnest(ARRAY[${sql.join(
+          authTables.map((table) => sql`${table}`),
+          sql`, `
+        )}]::text[]) AS name,
+          unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE']) AS privilege)
       AND (to_regnamespace('drizzle') IS NULL OR NOT has_schema_privilege(${role}, 'drizzle', 'USAGE'))
       AND (to_regclass('public.schema_migrations') IS NULL OR (
         has_table_privilege(${role}, 'public.schema_migrations', 'SELECT')

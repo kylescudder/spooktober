@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readAuthEnv, readDatabaseEnv, readEnv } from './env'
+import { readAuthEnv, readBetterAuthEnv, readDatabaseEnv, readEnv } from './env'
 
 test('runtime settings are typed without requiring Clerk setup', () => {
   const env = readEnv({ DATABASE_URL: 'postgres://localhost:5432/films' })
@@ -55,4 +55,65 @@ test('invalid runtime ports and modes are rejected', () => {
   for (const PORT of ['0', '65536', '3000.1', 'invalid'])
     assert.throws(() => readAuthEnv({ PORT }), /PORT/)
   assert.throws(() => readAuthEnv({ NODE_ENV: 'staging' }), /NODE_ENV/)
+})
+
+test('Better Auth settings are required only when selected and never echoed', () => {
+  assert.equal(readAuthEnv({}).AUTH_PROVIDER, 'clerk')
+  assert.throws(() => readAuthEnv({ AUTH_PROVIDER: 'auth0' }), /AUTH_PROVIDER/)
+  const secret = 'a-private-secret-that-is-long-enough-1234'
+  const complete = {
+    BETTER_AUTH_URL: 'https://films.example.com/',
+    BETTER_AUTH_SECRET: secret,
+    BREVO_API_KEY: 'private-brevo-key',
+    AUTH_EMAIL_FROM: 'films@example.com',
+    AUTH_ALLOWED_EMAILS:
+      ' Kyle@Example.com, rhiann@example.com,kyle@example.com '
+  }
+  const env = readBetterAuthEnv(complete)
+  assert.equal(env.BETTER_AUTH_URL, 'https://films.example.com')
+  assert.deepEqual(env.AUTH_ALLOWED_EMAILS, [
+    'kyle@example.com',
+    'rhiann@example.com'
+  ])
+  assert.equal(env.AUTH_EMAIL_DAILY_LIMIT, 40)
+  assert.equal(
+    readBetterAuthEnv({ ...complete, AUTH_EMAIL_DAILY_LIMIT: '12' })
+      .AUTH_EMAIL_DAILY_LIMIT,
+    12
+  )
+  for (const [key, value] of [
+    ['BETTER_AUTH_URL', undefined],
+    ['BETTER_AUTH_URL', 'https://films.example.com/path'],
+    ['BETTER_AUTH_SECRET', 'too-short'],
+    ['BREVO_API_KEY', ''],
+    ['AUTH_EMAIL_FROM', 'not-an-email'],
+    ['AUTH_ALLOWED_EMAILS', ''],
+    ['AUTH_ALLOWED_EMAILS', 'kyle@example.com,not-an-email'],
+    ['AUTH_EMAIL_DAILY_LIMIT', '0']
+  ] as const)
+    assert.throws(
+      () => readBetterAuthEnv({ ...complete, [key]: value }),
+      (error: unknown) => {
+        assert.match((error as Error).message, new RegExp(key))
+        assert.doesNotMatch((error as Error).message, /private|a-private/)
+        return true
+      }
+    )
+  // Production needs HTTPS for secure cookies and passkeys.
+  assert.throws(
+    () =>
+      readBetterAuthEnv({
+        ...complete,
+        BETTER_AUTH_URL: 'http://films.example.com',
+        NODE_ENV: 'production'
+      }),
+    /BETTER_AUTH_URL/
+  )
+  assert.equal(
+    readBetterAuthEnv({
+      ...complete,
+      BETTER_AUTH_URL: 'http://127.0.0.1:3921'
+    }).BETTER_AUTH_URL,
+    'http://127.0.0.1:3921'
+  )
 })

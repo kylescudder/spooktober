@@ -1,5 +1,7 @@
 import '@tanstack/react-start/server-only'
-import { readAuthEnv } from './env'
+import { readAuthEnv, readBetterAuthEnv } from './env'
+import { isVerifiedAllowedUser } from './auth-policy.ts'
+import type { AuthUser } from './auth-factory.ts'
 
 export const privateHeaders = {
   'Cache-Control': 'private, no-store',
@@ -8,9 +10,27 @@ export const privateHeaders = {
   'X-Frame-Options': 'DENY'
 }
 
+export type AuthProvider = 'clerk' | 'better-auth'
+
 export interface Configuration {
+  provider: AuthProvider
   allowedUserIDs: string[] | null
+  // Better Auth only: verified, still-invited emails. Null when unconfigured.
+  allowedEmails: readonly string[] | null
   publicURL: string
+}
+
+// Who the server resolved from the session: a Clerk user ID (Clerk), a Better
+// Auth user (Better Auth), or nobody. Never taken from request input.
+export type Viewer = string | AuthUser | null
+
+function betterAuthEmails(env: Record<string, string | undefined>) {
+  try {
+    return readBetterAuthEnv(env).AUTH_ALLOWED_EMAILS
+  } catch {
+    // Missing or invalid settings keep the existing setup response.
+    return null
+  }
 }
 
 export function configuration(
@@ -26,7 +46,25 @@ export function configuration(
     ids.length <= 2 &&
     ids.every((id) => /^user_[a-zA-Z0-9]+$/.test(id)) &&
     new Set(ids).size === ids.length
-  return { allowedUserIDs: valid ? ids : null, publicURL }
+  const provider = validated.AUTH_PROVIDER
+  return {
+    provider,
+    allowedUserIDs: valid ? ids : null,
+    allowedEmails: provider === 'better-auth' ? betterAuthEmails(env) : null,
+    publicURL
+  }
+}
+
+// Whether the selected provider has the settings it needs. Unconfigured apps
+// show the setup message and refuse the film API.
+export function authConfiguration(
+  env: Record<string, string | undefined> = process.env
+) {
+  const { provider, allowedEmails } = configuration(env)
+  if (provider === 'better-auth')
+    return { provider, configured: !!allowedEmails, publishableKey: '' }
+  const clerk = clerkConfiguration(env)
+  return { provider, ...clerk }
 }
 
 // Read through a server-only environment object at request time. The public key
@@ -49,12 +87,27 @@ export function clerkConfiguration(
 }
 
 export function accessFailure(
-  userId: string | null,
+  viewer: Viewer,
   config = configuration()
 ): { status: 401 | 403 | 503; error: string } | null {
-  if (!userId)
+  if (!viewer)
     return { status: 401, error: 'Please sign in to view the watchlist.' }
-  if (!config.allowedUserIDs)
+  if (typeof viewer !== 'string') {
+    // A Better Auth session never satisfies a Clerk deployment, and vice versa.
+    if (config.provider !== 'better-auth' || !config.allowedEmails)
+      return {
+        status: 503,
+        error: 'Sign-in is still being set up. Please try again later.'
+      }
+    if (!isVerifiedAllowedUser(viewer, config.allowedEmails))
+      return {
+        status: 403,
+        error: 'This watchlist is private to Kyle and Rhiann.'
+      }
+    return null
+  }
+  const userId = viewer
+  if (config.provider !== 'clerk' || !config.allowedUserIDs)
     return {
       status: 503,
       error: 'Sign-in is still being set up. Please try again later.'

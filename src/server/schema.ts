@@ -37,3 +37,6 @@ export const films = pgTable(
     unique('films_position_unique').on(table.year, table.position)
   ]
 )
+
+// Additive Better Auth tables, used only with AUTH_PROVIDER=better-auth.
+export * from './auth-schema.ts'

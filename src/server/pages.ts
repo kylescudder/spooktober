@@ -1,30 +1,46 @@
 import '@tanstack/react-start/server-only'
-import { auth } from '@clerk/tanstack-react-start/server'
 import { redirect } from '@tanstack/react-router'
-import { accessFailure, clerkConfiguration } from './auth'
+import { getRequest } from '@tanstack/react-start/server'
+import { accessFailure, authConfiguration } from './auth'
+import { resolveViewer } from './viewer'
 import { database, listFilms } from './database'
 import type { Film } from '../lib/films'
 import { currentYear } from '../lib/years'
 
-export async function pageData(
-  page: 'watchlist' | 'sign-in' | 'access-denied',
-  year = currentYear()
-) {
-  if (!clerkConfiguration().configured)
-    return { configured: false, films: null, year }
-  const { userId } = await auth({ acceptsToken: 'session_token' })
+export type Page =
+  'watchlist' | 'sign-in' | 'access-denied' | 'auth' | 'profile'
+
+export async function pageData(page: Page, year = currentYear()) {
+  const { provider, configured } = authConfiguration()
+  const unconfigured = { configured: false, provider, films: null, year }
+  if (!configured) return unconfigured
+  const ready = { configured: true, provider, films: null, year }
+  const betterAuth = provider === 'better-auth'
+  const signInPath = betterAuth ? '/auth/sign-in' : '/sign-in'
+  // Each provider has its own sign-in route; the other one sends people home.
+  if ((page === 'sign-in' && betterAuth) || (page === 'auth' && !betterAuth))
+    throw redirect({ href: signInPath })
+  if (page === 'profile' && !betterAuth) throw redirect({ to: '/' })
+  // Better Auth renders sign-in, reset and sign-out views client-side.
+  if (page === 'auth') return ready
+  const viewer = await resolveViewer(getRequest().headers)
   if (page === 'sign-in') {
-    if (userId) throw redirect({ to: '/' })
-    return { configured: true, films: null, year }
+    if (viewer) throw redirect({ to: '/' })
+    return ready
   }
-  const failure = accessFailure(userId)
-  if (failure?.status === 401) throw redirect({ href: '/sign-in' })
-  if (failure?.status === 503) return { configured: false, films: null, year }
+  const failure = accessFailure(viewer)
+  if (failure?.status === 401)
+    throw redirect({
+      href:
+        page === 'profile' ? `${signInPath}?redirectTo=%2Fprofile` : signInPath
+    })
+  if (failure?.status === 503) return unconfigured
   if (page === 'access-denied') {
     if (!failure) throw redirect({ to: '/' })
-    return { configured: true, films: null, year }
+    return ready
   }
   if (failure) throw redirect({ to: '/access-denied' })
+  if (page === 'profile') return ready
   let films: Film[] | null = null
   try {
     films = await listFilms(database(), year)
@@ -33,5 +49,5 @@ export async function pageData(
       'Spooktober could not load the initial watchlist from PostgreSQL.'
     )
   }
-  return { configured: true, films, year }
+  return { configured: true, provider, films, year }
 }
