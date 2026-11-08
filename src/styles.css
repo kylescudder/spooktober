@@ -672,3 +672,47 @@ h1 span {
     transition: none !important;
   }
 }
+.auth-content [data-slot='card'] {
+  margin-bottom: 20px;
+}
+.auth-footnote {
+  font-size: 0.875rem;
+}
+.auth-footnote a,
+.profile-back {
+  color: var(--primary);
+  text-underline-offset: 4px;
+}
+.auth-footnote a:hover,
+.profile-back:hover {
+  text-decoration: underline;
+}
+.profile-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 36px 32px 48px;
+}
+.profile-page h1 {
+  margin: 32px 0 28px;
+  font-size: clamp(2.4rem, 7vw, 3.4rem);
+}
+.profile-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+@media (max-width: 640px) {
+  .profile-page {
+    padding: 22px 17px 32px;
+  }
+}
+/* Better Auth UI (shadcn) borders default to the theme border, as in shadcn's
+   base layer. Scoped to its data-slot elements so the watchlist is unchanged. */
+@layer base {
+  [data-slot],
+  [data-slot] *,
+  [data-slot]::before,
+  [data-slot]::after {
+    border-color: var(--color-border);
+  }
+}

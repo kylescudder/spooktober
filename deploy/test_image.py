@@ -106,7 +106,8 @@ class RuntimeImage(unittest.TestCase):
         for statement in ("SELECT count(*) FROM public.films",
                           "INSERT INTO films (id,title,position,created_at,updated_at,year) VALUES ('t1','Halloween',0,'now','now',2026)",
                           "UPDATE films SET watched=true, watched_at='now' WHERE id='t1'",
-                          "DELETE FROM films WHERE id='t1'"):
+                          "DELETE FROM films WHERE id='t1'",
+                          "SELECT count(*) FROM auth_user", "DELETE FROM auth_session", "DELETE FROM auth_email_limit"):
             result = self.runtime_sql(statement)
             self.assertEqual(result.returncode, 0, f'{statement}: {result.stderr}')
         for statement in ("SELECT hash FROM drizzle.__drizzle_migrations",
@@ -136,7 +137,7 @@ class RuntimeImage(unittest.TestCase):
                 run_command(command)
         self.assertEqual(legacy_sql("SELECT id || ' ' || watched_at FROM films").stdout.strip(),
                          'kept 2026-10-31T23:00:00.123456789Z')
-        self.assertEqual(legacy_sql('SELECT count(*) FROM drizzle.__drizzle_migrations').stdout.strip(), '1')
+        self.assertEqual(legacy_sql('SELECT count(*) FROM drizzle.__drizzle_migrations').stdout.strip(), '2')
         # The previous release reads its history after a rollback, but can't change it.
         runtime = lambda statement: legacy_sql(statement, RUNTIME, self.runtime_password)
         self.assertEqual(runtime('SELECT max(version) FROM schema_migrations').stdout.strip(), '2')

@@ -10,7 +10,7 @@ import {
   removeFilmSchema,
   setWatchedSchema
 } from '../lib/validation.ts'
-import { accessFailure } from './auth.ts'
+import { accessFailure, type Viewer } from './auth.ts'
 import {
   addFilm,
   database,
@@ -22,8 +22,9 @@ import {
 } from './database.ts'
 import { currentYear, seasonSchema } from '../lib/years.ts'
 
-// userId comes only from Clerk's verified server session, never request input.
-const t = initTRPC.context<{ userId: string | null }>().create({
+// The viewer comes only from the provider's verified server session (a Clerk
+// user ID or a Better Auth user), never from request input.
+const t = initTRPC.context<{ viewer: Viewer }>().create({
   errorFormatter({ shape, error }) {
     return {
       ...shape,
@@ -37,7 +38,7 @@ const t = initTRPC.context<{ userId: string | null }>().create({
 })
 
 const authenticated = t.procedure.use(async ({ ctx, next }) => {
-  const failure = accessFailure(ctx.userId)
+  const failure = accessFailure(ctx.viewer)
   if (failure)
     throw new TRPCError({
       code:

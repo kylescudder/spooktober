@@ -1,10 +1,8 @@
-import { auth } from '@clerk/tanstack-react-start/server'
 import { createFileRoute } from '@tanstack/react-router'
 import { createTrpcHandler } from '../server/trpc-handler'
+import { resolveViewer } from '../server/viewer'
 
-const handler = createTrpcHandler(
-  async () => (await auth({ acceptsToken: 'session_token' })).userId
-)
+const handler = createTrpcHandler((request) => resolveViewer(request.headers))
 
 export const Route = createFileRoute('/api/trpc/$')({
   server: {

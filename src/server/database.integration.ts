@@ -242,14 +242,14 @@ test('annual lists keep additions, watched progress and order separate', async (
   assert.deepEqual(await listFilms(pool, 2027), nextYear)
 })
 
-test('migrations are repeatable and record one baseline', async (t) => {
+test('migrations are repeatable and record the baseline and auth tables once', async (t) => {
   const { pool } = await testDatabase(t)
   await migrateDatabase(pool)
   await migrateDatabase(pool)
   assert.deepEqual(await listFilms(pool), [])
   const [journal] = await pool.$client`
     SELECT count(*)::int AS applied FROM drizzle.__drizzle_migrations`
-  assert.equal(journal!.applied, 1)
+  assert.equal(journal!.applied, 2)
 })
 
 test('the baseline adopts a database from the pre-Drizzle migrations', async (t) => {
