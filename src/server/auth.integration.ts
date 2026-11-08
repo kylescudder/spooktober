@@ -47,7 +47,6 @@ async function authFixture(
   const secret = randomUUID() + randomUUID()
   Object.assign(process.env, {
     DATABASE_URL: url.href,
-    AUTH_PROVIDER: 'better-auth',
     BETTER_AUTH_URL: authOrigin,
     BETTER_AUTH_SECRET: secret,
     BREVO_API_KEY: 'fixture-never-used-to-send',
@@ -83,10 +82,7 @@ async function authFixture(
       links.push({ email, kind, url })
     }
   )
-  const route = createAuthRouteHandler(
-    () => auth,
-    () => 'better-auth'
-  )
+  const route = createAuthRouteHandler(() => auth)
   const ip = `203.0.113.${++fixtureNumber}`
   function request(
     path: string,
@@ -214,11 +210,6 @@ test('email-code sign-in is allowlisted, hashed, single-use and opens the watchl
   assert.equal(films.status, 200)
   assert.equal((await films.json()).result.data.length, 20)
   assert.equal((await fixture.films('')).status, 401)
-  // Rolling back to Clerk: a Better Auth session never satisfies Clerk.
-  process.env.AUTH_PROVIDER = 'clerk'
-  process.env.CLERK_ALLOWED_USER_IDS = 'user_Kyle,user_Rhiann'
-  assert.equal((await fixture.films(cookie)).status, 503)
-  process.env.AUTH_PROVIDER = 'better-auth'
   // Codes are single-use.
   assert.equal(
     (
@@ -605,7 +596,7 @@ test('profile photos are re-encoded without metadata, private to their owner and
   )
   assert.equal((await avatar('POST')).status, 405)
 
-  // The app route: Better Auth uses this handler; Clerk mode has no endpoint.
+  // The app route: without Better Auth settings there is no endpoint.
   const globals = globalThis as typeof globalThis & { spooktoberAuth?: unknown }
   delete globals.spooktoberAuth
   t.after(() => {
@@ -626,7 +617,7 @@ test('profile photos are re-encoded without metadata, private to their owner and
     ).status,
     401
   )
-  process.env.AUTH_PROVIDER = 'clerk'
+  delete process.env.AUTH_ALLOWED_EMAILS
   for (const method of ['GET', 'PUT', 'DELETE'])
     assert.equal(
       (
@@ -640,7 +631,7 @@ test('profile photos are re-encoded without metadata, private to their owner and
       404,
       method
     )
-  process.env.AUTH_PROVIDER = 'better-auth'
+  process.env.AUTH_ALLOWED_EMAILS = allowedEmails.join(',')
 
   // Deleting the account removes its photo row.
   await rows(fixture.db, `DELETE FROM auth_user WHERE id = '${other.user.id}'`)
@@ -924,15 +915,5 @@ test('mail outages answer generically and the app route exposes only used endpoi
       (await fixture.request(path, method === 'GET' ? undefined : {})).status,
       404,
       path
-    )
-  // With Clerk selected (the default), no Better Auth endpoint is reachable.
-  const clerk = createAuthRouteHandler(
-    () => fixture.auth,
-    () => 'clerk'
-  )
-  for (const path of ['/get-session', '/sign-in/email-otp', '/sign-in/email'])
-    assert.equal(
-      (await clerk(new Request(authOrigin + '/api/auth' + path))).status,
-      404
     )
 })

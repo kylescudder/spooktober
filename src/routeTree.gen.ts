@@ -14,7 +14,6 @@ import { Route as AccessDeniedRouteImport } from './routes/access-denied'
 import { Route as HealthzRouteImport } from './routes/healthz'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as AuthPathRouteImport } from './routes/auth.$path'
-import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
 import { Route as ApiProfileAvatarRouteImport } from './routes/api.profile.avatar'
 import { Route as ApiTrpcSplatRouteImport } from './routes/api.trpc.$'
@@ -44,11 +43,6 @@ const AuthPathRoute = AuthPathRouteImport.update({
   path: '/auth/$path',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SignInSplatRoute = SignInSplatRouteImport.update({
-  id: '/sign-in/$',
-  path: '/sign-in/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -71,7 +65,6 @@ export interface FileRoutesByFullPath {
   '/healthz': typeof HealthzRoute
   '/profile': typeof ProfileRoute
   '/auth/$path': typeof AuthPathRoute
-  '/sign-in/$': typeof SignInSplatRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/profile/avatar': typeof ApiProfileAvatarRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
@@ -82,7 +75,6 @@ export interface FileRoutesByTo {
   '/healthz': typeof HealthzRoute
   '/profile': typeof ProfileRoute
   '/auth/$path': typeof AuthPathRoute
-  '/sign-in/$': typeof SignInSplatRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/profile/avatar': typeof ApiProfileAvatarRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
@@ -94,7 +86,6 @@ export interface FileRoutesById {
   '/healthz': typeof HealthzRoute
   '/profile': typeof ProfileRoute
   '/auth/$path': typeof AuthPathRoute
-  '/sign-in/$': typeof SignInSplatRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/profile/avatar': typeof ApiProfileAvatarRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
@@ -107,7 +98,6 @@ export interface FileRouteTypes {
     | '/healthz'
     | '/profile'
     | '/auth/$path'
-    | '/sign-in/$'
     | '/api/auth/$'
     | '/api/profile/avatar'
     | '/api/trpc/$'
@@ -118,7 +108,6 @@ export interface FileRouteTypes {
     | '/healthz'
     | '/profile'
     | '/auth/$path'
-    | '/sign-in/$'
     | '/api/auth/$'
     | '/api/profile/avatar'
     | '/api/trpc/$'
@@ -129,7 +118,6 @@ export interface FileRouteTypes {
     | '/healthz'
     | '/profile'
     | '/auth/$path'
-    | '/sign-in/$'
     | '/api/auth/$'
     | '/api/profile/avatar'
     | '/api/trpc/$'
@@ -141,7 +129,6 @@ export interface RootRouteChildren {
   HealthzRoute: typeof HealthzRoute
   ProfileRoute: typeof ProfileRoute
   AuthPathRoute: typeof AuthPathRoute
-  SignInSplatRoute: typeof SignInSplatRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiProfileAvatarRoute: typeof ApiProfileAvatarRoute
   ApiTrpcSplatRoute: typeof ApiTrpcSplatRoute
@@ -184,13 +171,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthPathRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/sign-in/$': {
-      id: '/sign-in/$'
-      path: '/sign-in/$'
-      fullPath: '/sign-in/$'
-      preLoaderRoute: typeof SignInSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -221,7 +201,6 @@ const rootRouteChildren: RootRouteChildren = {
   HealthzRoute: HealthzRoute,
   ProfileRoute: ProfileRoute,
   AuthPathRoute: AuthPathRoute,
-  SignInSplatRoute: SignInSplatRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiProfileAvatarRoute: ApiProfileAvatarRoute,
   ApiTrpcSplatRoute: ApiTrpcSplatRoute,

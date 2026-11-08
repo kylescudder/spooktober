@@ -38,7 +38,7 @@ export const films = pgTable(
   ]
 )
 
-// Additive Better Auth tables, used only with AUTH_PROVIDER=better-auth.
+// Better Auth's sign-in tables.
 export * from './auth-schema.ts'
 // The Better Auth user's private profile photo.
 export * from './profile-schema.ts'

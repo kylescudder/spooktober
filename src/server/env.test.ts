@@ -2,11 +2,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readAuthEnv, readBetterAuthEnv, readDatabaseEnv, readEnv } from './env'
 
-test('runtime settings are typed without requiring Clerk setup', () => {
+test('runtime settings are typed without requiring sign-in setup', () => {
   const env = readEnv({ DATABASE_URL: 'postgres://localhost:5432/films' })
   assert.equal(env.PORT, 8080)
   assert.equal(env.NODE_ENV, 'development')
-  assert.equal(env.CLERK_SECRET_KEY, undefined)
   assert.equal(
     readEnv({ DATABASE_URL: env.DATABASE_URL, PORT: '8123' }).PORT,
     8123
@@ -57,9 +56,9 @@ test('invalid runtime ports and modes are rejected', () => {
   assert.throws(() => readAuthEnv({ NODE_ENV: 'staging' }), /NODE_ENV/)
 })
 
-test('Better Auth settings are required only when selected and never echoed', () => {
-  assert.equal(readAuthEnv({}).AUTH_PROVIDER, 'clerk')
-  assert.throws(() => readAuthEnv({ AUTH_PROVIDER: 'auth0' }), /AUTH_PROVIDER/)
+test('Better Auth settings are validated and never echoed', () => {
+  // A leftover provider switch is ignored, whatever its value.
+  assert.doesNotThrow(() => readAuthEnv({ AUTH_PROVIDER: 'auth0' }))
   const secret = 'a-private-secret-that-is-long-enough-1234'
   const complete = {
     BETTER_AUTH_URL: 'https://films.example.com/',

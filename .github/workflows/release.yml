@@ -1,5 +1,5 @@
 # Publishes a checked, attested image for every commit on main. GitHub holds
-# only webhook/Access credentials, never database, Clerk or shell access.
+# only webhook/Access credentials, never database, auth or shell access.
 name: Release
 
 on:

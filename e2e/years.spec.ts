@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test'
 const base = `http://127.0.0.1:${Number(process.env.E2E_PORT || 8080) + 3}`
 test.skip(
   !process.env.E2E_WATCHLIST_DATABASE_URL,
-  'Requires a disposable PostgreSQL control database; Clerk is replaced at the existing trusted-session seam.'
+  'Requires a disposable PostgreSQL control database; the session is supplied at the existing trusted-session seam.'
 )
 
 test('defaults follow the current year; selecting a year survives reload and browser navigation', async ({

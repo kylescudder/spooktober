@@ -13,8 +13,8 @@ import { AuthSetupMessage } from '../components/auth-message'
 import { loadPage } from '../lib/page-data'
 import { clearPendingSignIn } from '../lib/pending-sign-in'
 
-// Better Auth only: the server sends Clerk deployments home, signed-out
-// viewers to sign-in and uninvited ones to the access-denied page.
+// The server sends signed-out viewers to sign-in and uninvited ones to the
+// access-denied page.
 export const Route = createFileRoute('/profile')({
   loader: () => loadPage({ data: 'profile' }),
   component: ProfilePage
