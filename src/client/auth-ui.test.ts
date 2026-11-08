@@ -47,6 +47,8 @@ let lastVerify: unknown
 let sessionRequests = 0
 let releaseSession: (() => void) | undefined
 let delaySession = false
+let avatarRequests: { method: string; type: string | null; size: number }[] = []
+let avatarFails = false
 
 before(async () => {
   const globals = {
@@ -88,6 +90,24 @@ before(async () => {
           : input.url,
       browser.location.origin
     )
+    if (url.pathname === '/api/profile/avatar') {
+      const method = init?.method ?? 'GET'
+      const body = init?.body as Blob | undefined
+      avatarRequests.push({
+        method,
+        type: new Headers(init?.headers).get('content-type'),
+        size: body ? body.size : 0
+      })
+      if (avatarFails)
+        return Response.json(
+          { error: 'This photo is too large.' },
+          { status: 413 }
+        )
+      const image =
+        method === 'PUT' ? '/api/profile/avatar?v=uploaded-version' : null
+      profileState = { ...profileState, image }
+      return Response.json({ image })
+    }
     if (url.pathname === '/api/auth/update-user') {
       profileSave = JSON.parse(init?.body as string)
       profileState = { ...profileState, ...(profileSave as Partial<Profile>) }
@@ -169,6 +189,8 @@ beforeEach(() => {
   lastVerify = undefined
   delaySession = false
   releaseSession = undefined
+  avatarRequests = []
+  avatarFails = false
   profileSession = false
   profileUserId = 'first-user'
   profileSave = undefined
@@ -454,8 +476,13 @@ test('profile keeps drafts through session refresh, saves names only and isolate
   )!
   assert.ok(email)
   assert.equal(email.readOnly, true)
-  // Spooktober has no photo storage, so no avatar upload is offered.
-  assert.equal(container.querySelector('input[type="file"]'), null)
+  // Photos upload through the private avatar endpoint (see the photo test).
+  assert.equal(
+    container
+      .querySelector<HTMLInputElement>('input[type="file"]')
+      ?.getAttribute('accept'),
+    'image/jpeg,image/png,image/webp'
+  )
   const fill = async (suffix: string, value: string) => {
     const field = container.querySelector<HTMLInputElement>(
       `input[name$="${suffix}"]`
@@ -522,6 +549,67 @@ test('profile keeps drafts through session refresh, saves names only and isolate
     container.querySelector<HTMLInputElement>('input[name$="email"]')!.value,
     'rhiann@example.com'
   )
+})
+
+test('profile photo uploads and removes through the private avatar endpoint', async () => {
+  profileSession = true
+  profileState = {
+    ...profileState,
+    image: '/api/profile/avatar?v=first-version'
+  }
+  profileClient = new queryTools.QueryClient({
+    defaultOptions: { queries: { retry: false } }
+  })
+  root = createRoot(container)
+  await act(async () => {
+    root!.render(
+      createElement(
+        AuthUIProvider,
+        {
+          authClient,
+          queryClient: profileClient,
+          navigate: () => {},
+          emailAndPassword: { enabled: false },
+          additionalFields: profileUI.profileFields,
+          avatar: profileUI.profileAvatar,
+          localization: { auth: { name: 'Display name' } }
+        },
+        createElement(UserProfile)
+      )
+    )
+  })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 30))
+  })
+  // Radix shows the <img> only after it loads, which happy-dom never does;
+  // the browser check covers the rendered photo.
+  assert.ok(container.querySelector('input[type="file"]'))
+  assert.ok(container.querySelector('[data-slot="avatar"]'))
+  assert.equal(profileUI.profileAvatar.enabled, true)
+  assert.equal(profileUI.profileAvatar.extension, 'jpg')
+  const photo = new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0])], 'a.jpg', {
+    type: 'image/jpeg'
+  })
+  assert.equal(
+    await profileUI.profileAvatar.upload(photo),
+    '/api/profile/avatar?v=uploaded-version'
+  )
+  await profileUI.profileAvatar.delete()
+  assert.deepEqual(avatarRequests, [
+    { method: 'PUT', type: 'image/jpeg', size: 4 },
+    { method: 'DELETE', type: null, size: 0 }
+  ])
+  // Server errors reach the UI's error toast rather than a silent success.
+  avatarFails = true
+  await assert.rejects(profileUI.profileAvatar.upload(photo), /too large/)
+  // Unsupported files are refused before any upload.
+  await assert.rejects(
+    profileUI.prepareAvatar(
+      new File(['<svg/>'], 'x.svg', { type: 'image/svg+xml' })
+    ),
+    /JPEG, PNG or WebP/
+  )
+  assert.equal(avatarRequests.length, 3)
 })
 
 test('email-code card uses the shadcn card and six code slots, normalizes email, and verifies only on submit', async () => {
