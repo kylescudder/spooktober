@@ -94,7 +94,7 @@ test('Better Auth settings are required only when selected and never echoed', ()
     assert.throws(
       () => readBetterAuthEnv({ ...complete, [key]: value }),
       (error: unknown) => {
-        assert.match((error as Error).message, new RegExp(key))
+        assert.ok((error as Error).message.includes(key))
         assert.doesNotMatch((error as Error).message, /private|a-private/)
         return true
       }
