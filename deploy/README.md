@@ -73,11 +73,10 @@ and nothing else; full detail stays in `state/deploy.log` and
 
 Files under the checkout:
 
-- `.env`: runtime database URL, production Clerk settings, allowed user IDs,
+- `.env`: runtime database URL, Better Auth and Brevo settings, allowed emails,
   public URL, actual network names and the successfully deployed image digest.
 - `.env.migration`: owner/migration database URL only.
 - `.env.deploy-hook`: UID/GID, web network and protected queue/secret paths.
-- `secrets/clerk-production.env`: retained private production auth settings.
 - `secrets/deploy-webhook-secret`: generated HMAC secret.
 - `backups/hosted-watchlist-cutover.json`: authoritative hosted-list snapshot.
 - `state/deployment.json`, `state/history.log`: deployed image/revision records.
@@ -86,7 +85,7 @@ Credential files are mode 0600, private directories 0700, and ignored by Git.
 Project role credentials remain in `/Users/kyle/platform/projects/spooktober`.
 GitHub receives only `DEPLOY_WEBHOOK_SECRET`, `CF_ACCESS_CLIENT_ID` and
 `CF_ACCESS_CLIENT_SECRET` in the `production` environment; it receives no
-database, Clerk, SSH or Docker credentials. Host-side `gh` uses the existing
+database, auth, SSH or Docker credentials. Host-side `gh` uses the existing
 authenticated Kyle account; do not copy that login into the receiver or GitHub.
 
 The first hosted import contains 20 films, three watched, with every ID, title,
@@ -103,17 +102,16 @@ in `.env.migration`:
 | Setting                                       | Value                                                                  |
 | --------------------------------------------- | ---------------------------------------------------------------------- |
 | `DATABASE_URL`                                | Restricted `spooktober_runtime` login for the `spooktober` database    |
-| `CLERK_PUBLISHABLE_KEY`                       | Production instance's public `pk_live_...` key                         |
-| `CLERK_SECRET_KEY`                            | Same instance's private `sk_live_...` key                              |
-| `CLERK_ALLOWED_USER_IDS`                      | Kyle and Rhiann's exact production user IDs, comma separated           |
+| Better Auth settings                          | See [Sign-in with Better Auth](#sign-in-with-better-auth)              |
 | `PUBLIC_URL`                                  | `https://spooktober.thescudders.org`                                   |
 | `PLATFORM_WEB_NETWORK`, `PLATFORM_DB_NETWORK` | `platform-web`, `platform-db`                                          |
 | `SPOOKTOBER_IMAGE`                            | Successfully deployed `ghcr.io/kylescudder/spooktober@sha256:<digest>` |
 
 Percent-encode special characters in database URL credentials. `sslmode=disable`
 is for the private Docker database network; use the endpoint's required TLS
-configuration elsewhere. Only the Clerk publishable key reaches the browser.
-The legacy `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` name is also accepted, so existing runtime files need no immediate change. All settings are read at runtime; build arguments contain no credentials.
+configuration elsewhere. No setting reaches the browser. Settings the app no
+longer uses are ignored. All settings are read at runtime; build arguments
+contain no credentials.
 
 The image listens on `0.0.0.0:8080`, with a 256 MiB container limit, a 128 MiB
 JavaScript heap and four database connections. Its filesystem is read-only with
@@ -123,11 +121,7 @@ connectivity and access to `films`, returning 200 or 503 without film data.
 ## Canonical hostname
 
 Production moved to `https://spooktober.thescudders.org` on 27 October 2026.
-Herman's `PUBLIC_URL` and runtime Clerk publishable key use this origin and
-`clerk.spooktober.thescudders.org`. The existing Clerk production instance and
-user allow-list are retained. Clerk uses the secondary application domain
-configuration so its auth, account portal and email records stay scoped to
-`spooktober.thescudders.org`.
+Herman's `PUBLIC_URL` and `BETTER_AUTH_URL` use this origin.
 
 The former `spooktober.kylescudder.co.uk` hostname remains registered to
 `spooktober-redirect:8080`. Herman's installed Compose configuration includes a
@@ -136,70 +130,25 @@ redirects to the new origin while preserving paths and query strings. Start
 that service when recovering the app's host configuration; it has no database
 network or published ports. The deploy webhook keeps its existing protected URL.
 
-## Clerk configuration
+## Sign-in with Better Auth
 
-Use the existing Spooktober application, `app_3KY8TyyPWhWcj8kdLfZTH7uW56L`:
+Sign-in is self-hosted [Better Auth](https://www.better-auth.com). The owner
+migration `0001_better_auth` adds `auth_user`, `auth_session`, `auth_account`,
+`auth_verification`, `auth_passkey`, `auth_rate_limit` and `auth_email_limit`,
+and the runtime grant covers them. Films are shared between Kyle and Rhiann and
+are not keyed by user ID: access is decided by the email allow-list.
 
-- Development instance: `ins_3KY8U3Is3W3o269nRbIVTDM86uT`.
-- Production instance: `ins_3KY8wpRSWNfSvus47xrxHGyrfSW`.
-- Kyle (`kyle@thescudders.org`) and Rhiann (`rhiann@thescudders.org`) already
-  have accounts in both instances. Use their saved instance-specific user IDs.
-
-Email-code sign-in is enabled; passwords, social sign-in and public registration
-are disabled. Home is `/`; custom sign-in and after-sign-out paths are `/sign-in`.
-The app accepts one or two exact `user_...` IDs and denies film access for missing,
-malformed or duplicate entries. Keep development and production keys/users separate.
-
-Local private `.env.clerk.production` is auth configuration only and is not loaded
-automatically by the app. Merge its values with the host's protected database/network
-configuration; the deployed copy is retained in `secrets/clerk-production.env`.
-
-The production CNAME records are listed below. Check them against the existing
-[production Domains page](https://dashboard.clerk.com/apps/app_3KY8TyyPWhWcj8kdLfZTH7uW56L/instances/ins_3KY8wpRSWNfSvus47xrxHGyrfSW/domains)
-before changing DNS. Keep proxying off (**DNS only**) and verify DNS, TLS
-certificates and email-domain verification there before release.
-
-| Name                                         | Target                              |
-| -------------------------------------------- | ----------------------------------- |
-| `clerk.spooktober.thescudders.org`           | `frontend-api.clerk.services`       |
-| `accounts.spooktober.thescudders.org`        | `accounts.clerk.services`           |
-| `clkmail.spooktober.thescudders.org`         | `mail.94amzdakfy8l.clerk.services`  |
-| `clk._domainkey.spooktober.thescudders.org`  | `dkim1.94amzdakfy8l.clerk.services` |
-| `clk2._domainkey.spooktober.thescudders.org` | `dkim2.94amzdakfy8l.clerk.services` |
-
-The app needs outbound HTTPS/DNS to Clerk, and browsers must reach its Frontend
-API at `https://clerk.spooktober.thescudders.org`. Set `PUBLIC_URL` to the exact
-external HTTPS origin for session and write-origin checks. After changing keys or
-allowed IDs, recreate the app and verify real login/logout for both people,
-expired sessions and denial of an uninvited account.
-
-## Better Auth rollout and Clerk rollback
-
-`AUTH_PROVIDER` selects exactly one sign-in provider for the server and the
-rendered pages. It defaults to `clerk`, so this release changes nothing until
-it is switched. With `clerk`, every `/api/auth/*` path answers 404 and the
-Clerk pages, middleware and allow-list work as before. Changing provider means
-recreating the app container; the process environment is not hot-swapped.
-
-The owner migration `0001_better_auth` only adds `auth_user`, `auth_session`,
-`auth_account`, `auth_verification`, `auth_passkey`, `auth_rate_limit` and
-`auth_email_limit`, and the runtime grant now covers them. Films are shared
-between Kyle and Rhiann and are not keyed by user ID, so no film data changes
-and no Clerk user linking is needed: access is decided by the email allow-list.
-
-Profile photos (Better Auth only) arrive with the additive migration
+Profile photos arrive with the additive migration
 `0002_profile`, which creates `user_profile` (one row per auth user, removed with
 it); the runtime grant covers it too. Uploads go to `/api/profile/avatar`, which
 requires a verified email still in `AUTH_ALLOWED_EMAILS`, accepts JPEG, PNG or
 WebP up to 2 MiB, and stores a `sharp` re-encoded, metadata-free 256-pixel JPEG
 in PostgreSQL, so the existing encrypted backups already cover it. Photos are
-served only to their owner with `no-store`. With `clerk`, the endpoint answers 404. Rolling back leaves the table in place, unused.
+served only to their owner with `no-store`.
 
-Prepare these settings in the host's protected runtime configuration, keeping
-the Clerk keys and `CLERK_ALLOWED_USER_IDS` for rollback:
+Keep these settings in the host's protected runtime configuration:
 
 ```dotenv
-AUTH_PROVIDER=clerk
 BETTER_AUTH_URL=https://spooktober.thescudders.org
 BETTER_AUTH_SECRET=<stable, cryptographically random app-specific secret, 32+ characters>
 BREVO_API_KEY=<Spooktober transactional API key>
@@ -208,18 +157,17 @@ AUTH_EMAIL_DAILY_LIMIT=40
 AUTH_ALLOWED_EMAILS=kyle@thescudders.org,rhiann@thescudders.org
 ```
 
-These are required only when `better-auth` is selected; a missing or invalid
-value then shows the setup message and refuses the film API, and error messages
+A missing or invalid value shows the setup message, refuses the film API and
+answers 404 on `/api/profile/avatar`, and error messages
 name settings, never values. `BETTER_AUTH_URL` must be HTTPS in production and is
 also the passkey RP ID (its hostname) and origin. Keep the secret stable across
 releases and out of Git, image layers and CI.
 
-Cutover: deploy the image through the central service (owner migrations run as
-usual), confirm the Clerk site still works, then set `AUTH_PROVIDER=better-auth`
-and recreate only the app service with the same image. Each person signs in once
-with an email code or magic link, which creates their account; a password can
-then be set from Profile. Verify sign-in for both people, an uninvited address
-getting no email, the watchlist and sign-out.
+Changing these settings means recreating the app container; the process
+environment is not hot-swapped. Each person signs in once with an email code or
+magic link, which creates their account; a password can then be set from
+Profile. After changing settings, verify sign-in for both people, an uninvited
+address getting no email, the watchlist and sign-out.
 
 Sign-in lives at `/auth/<view>` and offers four methods that link to each other:
 password (`/auth/sign-in`), email code (`/auth/email-otp`), magic link
@@ -227,8 +175,7 @@ password (`/auth/sign-in`), email code (`/auth/email-otp`), magic link
 `/auth/reset-password`. They use the official Better Auth UI shadcn components,
 styled with the watchlist's colours. Every method returns to the watchlist, or a
 same-site `?redirectTo=` path such as `/profile`. `/auth/sign-up` redirects to
-sign-in; there is no sign-up, and the Clerk `/sign-in` page redirects to
-`/auth/sign-in`.
+sign-in; there is no sign-up.
 
 Access needs a session whose email is verified and still in
 `AUTH_ALLOWED_EMAILS`, checked on every page load and tRPC call: removing an
@@ -255,10 +202,6 @@ never the code.
 Emails are sent by Brevo's HTTP API (8 second timeout) with a branded layout and
 `/email-logo.png`; provider responses, codes, links and keys are never logged.
 Brevo's free plan adds a `List-Unsubscribe` header to transactional mail.
-
-To roll back, set `AUTH_PROVIDER=clerk` and recreate the app service with the
-same image. Keep the Clerk application, keys, DNS and allowed user IDs. Leave the
-additive auth tables in place; never restore an older database to change provider.
 
 ## Install and operate
 
@@ -371,15 +314,14 @@ behind the same Access service token and also requires an HMAC over
 `status\n<digest>\n<revision>\n<timestamp>` (a webhook signature cannot be replayed
 against it) and a timestamp within five minutes. It returns only fixed-vocabulary fields.
 
-Clerk's production domain CNAMEs are DNS-only and separate from the tunnel.
-The runtime allows only Kyle and Rhiann's existing production user IDs.
+The runtime allows only Kyle and Rhiann's verified, allowlisted emails.
 Anonymous requests reveal no film data.
 
 Preserve session cookies, `Authorization`, `Origin`, `X-Spooktober-Request` and
 the external host/forwarded HTTPS information. Honor private/no-store caching for
 HTML and `/api/trpc`; bypass Cloudflare caching for authenticated pages and API
-responses. Public artwork and Vite static assets may be cached. The app uses
-Clerk directly; additional Basic Auth challenges interfere with sign-in.
+responses. Public artwork and Vite static assets may be cached. Additional
+Basic Auth challenges interfere with sign-in.
 
 ## Database maintenance
 

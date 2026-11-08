@@ -1,4 +1,3 @@
-import { SignOutButton } from '@clerk/tanstack-react-start'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import { AuthMessage, AuthSetupMessage } from '../components/auth-message'
@@ -10,7 +9,7 @@ export const Route = createFileRoute('/access-denied')({
 })
 
 function AccessDeniedPage() {
-  const { configured, provider } = Route.useLoaderData()
+  const { configured } = Route.useLoaderData()
   if (!configured) return <AuthSetupMessage />
   return (
     <AuthMessage title='This is our little film club.'>
@@ -18,13 +17,7 @@ function AccessDeniedPage() {
         This watchlist is private to Kyle and Rhiann. Try signing in with your
         invited account.
       </p>
-      {provider === 'better-auth' ? (
-        <BetterAuthSignOut />
-      ) : (
-        <SignOutButton redirectUrl='/sign-in'>
-          <button className='auth-button'>Use another account</button>
-        </SignOutButton>
-      )}
+      <BetterAuthSignOut />
     </AuthMessage>
   )
 }
@@ -37,7 +30,7 @@ function BetterAuthSignOut() {
     setPending(true)
     setError('')
     try {
-      // Imported on demand: only uninvited Better Auth viewers need the client.
+      // Imported on demand: only uninvited viewers need the client.
       const { authClient } = await import('../lib/auth-client')
       const result = await authClient.signOut()
       if (result.error) throw new Error('Sign-out failed')

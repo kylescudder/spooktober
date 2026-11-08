@@ -8,8 +8,8 @@ const globals = globalThis as typeof globalThis & {
   spooktoberAuth?: SpooktoberAuth
 }
 
-// Created on first use with AUTH_PROVIDER=better-auth; Clerk deployments never
-// construct it, so they need none of these settings.
+// Created on first use, so the app can start and show the setup message before
+// these settings exist.
 export function getBetterAuth(): SpooktoberAuth {
   if (globals.spooktoberAuth) return globals.spooktoberAuth
   const env = readBetterAuthEnv()

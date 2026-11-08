@@ -93,10 +93,8 @@ export async function migrateDatabase(db: Database) {
 
 const roleName = /^[a-z_][a-z0-9_]{0,62}$/
 
-// Better Auth's additive tables and the profile photo table. The runtime reads
-// and writes them (sessions, codes, rate limits, photos) only when
-// AUTH_PROVIDER=better-auth, but is granted access in every release so
-// switching provider needs no database change.
+// Better Auth's tables and the profile photo table. The runtime reads and
+// writes them (sessions, codes, rate limits, photos).
 export const authTables = [
   'auth_user',
   'auth_session',

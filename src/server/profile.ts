@@ -5,10 +5,9 @@ import { database } from './database.ts'
 import { readBetterAuthEnv } from './env.ts'
 import { createProfileHandler } from './profile-handler.ts'
 
-// Better Auth only: with Clerk selected the photo endpoint does not exist.
+// Without Better Auth settings the photo endpoint does not exist.
 export function handleProfileRequest(request: Request) {
-  const { provider, configured } = authConfiguration()
-  if (provider !== 'better-auth' || !configured)
+  if (!authConfiguration().configured)
     return new Response('Not found', { status: 404, headers: privateHeaders })
   return createProfileHandler(database(), {
     origin: new URL(readBetterAuthEnv().BETTER_AUTH_URL).origin,

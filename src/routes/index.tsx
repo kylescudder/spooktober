@@ -1,5 +1,4 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { UserButton } from '@clerk/tanstack-react-start'
 import { lazy, Suspense, useEffect } from 'react'
 import { FilmList } from '../film-list'
 import { AuthSetupMessage } from '../components/auth-message'
@@ -7,8 +6,8 @@ import { loadWatchlistPage } from '../lib/page-data'
 import { clearPendingSignIn } from '../lib/pending-sign-in'
 import { watchlistSearch } from '../lib/years'
 
-// Loaded only for signed-in Better Auth viewers, so Clerk deployments and
-// public pages never download the Better Auth UI.
+// Loaded only for signed-in viewers, so public pages never download the
+// Better Auth UI.
 const BetterAuthUserMenu = lazy(() =>
   import('../components/better-auth-user-menu').then(
     ({ BetterAuthUserMenu }) => ({ default: BetterAuthUserMenu })
@@ -23,28 +22,23 @@ export const Route = createFileRoute('/')({
 })
 
 function WatchlistPage() {
-  const { configured, films, year, provider } = Route.useLoaderData()
+  const { configured, films, year } = Route.useLoaderData()
   const navigate = Route.useNavigate()
-  const betterAuth = provider === 'better-auth'
   useEffect(() => {
     // The server only renders the list for a signed-in, invited viewer.
-    if (betterAuth && configured) clearPendingSignIn()
-  }, [betterAuth, configured])
+    if (configured) clearPendingSignIn()
+  }, [configured])
   return configured ? (
     <FilmList
       key={year}
       year={year}
       initialFilms={films}
       account={
-        betterAuth ? (
-          <Suspense
-            fallback={<span className='bg-muted block size-8 rounded-full' />}
-          >
-            <BetterAuthUserMenu />
-          </Suspense>
-        ) : (
-          <UserButton />
-        )
+        <Suspense
+          fallback={<span className='bg-muted block size-8 rounded-full' />}
+        >
+          <BetterAuthUserMenu />
+        </Suspense>
       }
       onYearChange={(year) => {
         void navigate({ search: { year } })

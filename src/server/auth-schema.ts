@@ -9,8 +9,7 @@ import {
   uniqueIndex
 } from 'drizzle-orm/pg-core'
 
-// Separate, additive tables: Clerk rollback never requires removing auth data
-// or restoring an older copy of the watchlist. Films are shared, not per-user.
+// Separate from the watchlist: films are shared, not per-user.
 export const authUser = pgTable('auth_user', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),

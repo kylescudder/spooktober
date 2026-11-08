@@ -21,6 +21,7 @@ import {
 import { normalizeTimestamp, parseWatchlist } from './watchlist.ts'
 import { createTrpcHandler } from './trpc-handler.ts'
 import type { AppRouter } from './trpc.ts'
+import type { Viewer } from './auth.ts'
 
 async function testDatabase(t: TestContext) {
   const value = process.env.TEST_DATABASE_URL
@@ -425,15 +426,26 @@ test('tRPC transport validates inputs, requires auth and rejects unsafe requests
   }
   const previous = { ...process.env }
   process.env.DATABASE_URL = url.href
-  process.env.CLERK_ALLOWED_USER_IDS = 'user_Kyle,user_Rhiann'
+  Object.assign(process.env, {
+    BETTER_AUTH_URL: 'https://films.example.com',
+    BETTER_AUTH_SECRET: 'a-disposable-secret-that-is-long-enough',
+    BREVO_API_KEY: 'fixture-never-used-to-send',
+    AUTH_EMAIL_FROM: 'films@example.com',
+    AUTH_ALLOWED_EMAILS: 'kyle@example.com,rhiann@example.com'
+  })
   process.env.PUBLIC_URL = 'https://films.example.com'
   globals.spooktoberDatabase = pool
   cleanup.push(async () => {
     delete globals.spooktoberDatabase
     process.env = previous
   })
-  let userId: string | null = 'user_Kyle'
-  const trpcHandler = createTrpcHandler(async () => userId)
+  const viewer = (name: string) => ({
+    id: name,
+    email: `${name}@example.com`,
+    emailVerified: true
+  })
+  let signedIn: Viewer = viewer('kyle')
+  const trpcHandler = createTrpcHandler(async () => signedIn)
   const client = createTRPCClient<AppRouter>({
     links: [
       httpBatchLink({
@@ -544,9 +556,9 @@ test('tRPC transport validates inputs, requires auth and rejects unsafe requests
     })
   )
   const beforeDenied = await listFilms(pool)
-  userId = null
-  for (const user of [null, 'user_SomeoneElse']) {
-    userId = user
+  signedIn = null
+  for (const user of [null, viewer('someone')]) {
+    signedIn = user
     await assert.rejects(
       client.films.edit.mutate({
         id,
@@ -564,13 +576,12 @@ test('tRPC transport validates inputs, requires auth and rejects unsafe requests
         (user === null ? 401 : 403)
     )
   }
-  userId = null
+  signedIn = null
   const denied = await trpcHandler(
     new Request('http://localhost/api/trpc/films.list', {
       headers: {
-        'x-user-id': 'user_Kyle',
-        'x-clerk-auth-status': 'signed-in',
-        'x-clerk-auth-user-id': 'user_Kyle'
+        'x-user-id': 'kyle',
+        'x-user-email': 'kyle@example.com'
       }
     })
   )
@@ -589,7 +600,7 @@ test('tRPC transport validates inputs, requires auth and rejects unsafe requests
       body
     })
   assert.equal((await trpcHandler(post('{}'))).status, 401)
-  userId = 'user_SomeoneElse'
+  signedIn = viewer('someone')
   assert.equal(
     (await trpcHandler(new Request('http://localhost/api/trpc/films.list')))
       .status,
@@ -597,7 +608,7 @@ test('tRPC transport validates inputs, requires auth and rejects unsafe requests
   )
   assert.equal((await trpcHandler(post('{}'))).status, 403)
   assert.deepEqual(await listFilms(pool), beforeDenied)
-  userId = 'user_Rhiann'
+  signedIn = viewer('rhiann')
   assert.equal((await client.films.list.query()).length, 21)
   assert.equal(
     (await trpcHandler(post('{}', { origin: 'https://elsewhere.example' })))

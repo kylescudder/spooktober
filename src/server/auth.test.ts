@@ -3,95 +3,46 @@ import assert from 'node:assert/strict'
 import {
   accessFailure,
   authConfiguration,
-  clerkConfiguration,
   configuration,
   guardMutationRequest
 } from './auth.ts'
 import { createAuthRouteHandler, isAllowedAuthPath } from './auth-route.ts'
 import { appRouter } from './trpc.ts'
 
-const config = configuration({
-  CLERK_ALLOWED_USER_IDS: 'user_Kyle, user_Rhiann',
+const betterAuthEnv = {
+  BETTER_AUTH_URL: 'https://films.example.com',
+  BETTER_AUTH_SECRET: 'a-disposable-secret-that-is-long-enough',
+  BREVO_API_KEY: 'fixture-never-used-to-send',
+  AUTH_EMAIL_FROM: 'films@example.com',
+  AUTH_ALLOWED_EMAILS: 'kyle@example.com, Rhiann@example.com',
   PUBLIC_URL: 'https://films.example.com'
-})
+}
 
-test('only the two configured Clerk user IDs can access the private list', () => {
-  assert.equal(accessFailure('user_Kyle', config), null)
-  assert.equal(accessFailure('user_Rhiann', config), null)
-  assert.equal(accessFailure(null, config)?.status, 401)
-  assert.equal(accessFailure('user_SomeoneElse', config)?.status, 403)
-  assert.equal(accessFailure('user_kyle', config)?.status, 403)
-  assert.deepEqual(
-    configuration({ CLERK_ALLOWED_USER_IDS: 'user_Kyle' }).allowedUserIDs,
-    ['user_Kyle']
-  )
-})
+const config = configuration(betterAuthEnv)
+const kyle = { id: 'a', email: 'kyle@example.com', emailVerified: true }
 
-test('missing or malformed access configuration fails closed', () => {
-  for (const ids of [
-    undefined,
-    '',
-    'user_Kyle,',
-    '*',
-    'user_Kyle,user_Kyle',
-    'user_Kyle,user_Rhiann,user_Third',
-    'kyle@example.com'
-  ]) {
-    const invalid = configuration({ CLERK_ALLOWED_USER_IDS: ids })
-    assert.equal(invalid.allowedUserIDs, null)
-    assert.equal(accessFailure('user_Kyle', invalid)?.status, 503)
-  }
+test('malformed public origins are rejected', () => {
   assert.throws(() =>
     configuration({ PUBLIC_URL: 'https://films.example.com/path' })
   )
   assert.throws(() =>
     configuration({ PUBLIC_URL: 'https://user:password@films.example.com' })
   )
-  assert.equal(clerkConfiguration({}).configured, false)
-  assert.equal(
-    clerkConfiguration({
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'replace-with-publishable-key'
-    }).configured,
-    false
-  )
-})
-
-test('runtime Clerk keys support the existing deployment name and prefer the new name', () => {
-  const legacy = {
-    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:
-      'pk_test_ZXhhbXBsZS5jbGVyay5hY2NvdW50cy5kZXYk',
-    CLERK_SECRET_KEY: 'sk_test_fixture'
-  }
-  assert.equal(clerkConfiguration(legacy).configured, true)
-  assert.equal(
-    clerkConfiguration({
-      ...legacy,
-      CLERK_PUBLISHABLE_KEY: legacy.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
-    }).configured,
-    true
-  )
-  assert.equal(
-    clerkConfiguration({ ...legacy, CLERK_PUBLISHABLE_KEY: 'invalid' })
-      .configured,
-    false
-  )
-  assert.equal(
-    clerkConfiguration({ ...legacy, CLERK_SECRET_KEY: 'sk_live_fixture' })
-      .configured,
-    false
-  )
 })
 
 test('every tRPC procedure independently rejects signed-out and uninvited sessions before storage', async (t) => {
-  const previous = process.env.CLERK_ALLOWED_USER_IDS
-  process.env.CLERK_ALLOWED_USER_IDS = 'user_Kyle,user_Rhiann'
+  const previous = { ...process.env }
+  Object.assign(process.env, betterAuthEnv)
   t.after(() => {
-    if (previous === undefined) delete process.env.CLERK_ALLOWED_USER_IDS
-    else process.env.CLERK_ALLOWED_USER_IDS = previous
+    process.env = previous
   })
-  for (const userId of [null, 'user_SomeoneElse']) {
-    const caller = appRouter.createCaller({ viewer: userId })
-    const code = userId ? 'FORBIDDEN' : 'UNAUTHORIZED'
+  for (const viewer of [
+    null,
+    { ...kyle, email: 'someone@example.com' },
+    { ...kyle, emailVerified: false }
+  ]) {
+    const caller = appRouter.createCaller({ viewer })
+    const code = viewer ? 'FORBIDDEN' : 'UNAUTHORIZED'
     for (const call of [
       () => caller.films.list(),
       () =>
@@ -106,11 +57,10 @@ test('every tRPC procedure independently rejects signed-out and uninvited sessio
     ])
       await assert.rejects(call, { code })
   }
-  delete process.env.CLERK_ALLOWED_USER_IDS
-  await assert.rejects(
-    appRouter.createCaller({ viewer: 'user_Kyle' }).films.list(),
-    { code: 'SERVICE_UNAVAILABLE' }
-  )
+  delete process.env.AUTH_ALLOWED_EMAILS
+  await assert.rejects(appRouter.createCaller({ viewer: kyle }).films.list(), {
+    code: 'SERVICE_UNAVAILABLE'
+  })
 })
 
 test('writes require the configured public HTTPS origin, JSON and a custom request header', () => {
@@ -157,20 +107,7 @@ test('writes require the configured public HTTPS origin, JSON and a custom reque
   )
 })
 
-const betterAuthEnv = {
-  AUTH_PROVIDER: 'better-auth',
-  BETTER_AUTH_URL: 'https://films.example.com',
-  BETTER_AUTH_SECRET: 'a-disposable-secret-that-is-long-enough',
-  BREVO_API_KEY: 'fixture-never-used-to-send',
-  AUTH_EMAIL_FROM: 'films@example.com',
-  AUTH_ALLOWED_EMAILS: 'kyle@example.com, Rhiann@example.com',
-  PUBLIC_URL: 'https://films.example.com'
-}
-
 test('Better Auth access needs a verified email that is still invited', () => {
-  const config = configuration(betterAuthEnv)
-  assert.equal(config.provider, 'better-auth')
-  const kyle = { id: 'a', email: 'kyle@example.com', emailVerified: true }
   assert.equal(accessFailure(kyle, config), null)
   assert.equal(
     accessFailure({ ...kyle, email: 'RHIANN@example.com' }, config),
@@ -191,16 +128,6 @@ test('Better Auth access needs a verified email that is still invited', () => {
     AUTH_ALLOWED_EMAILS: 'rhiann@example.com'
   })
   assert.equal(accessFailure(kyle, removed)?.status, 403)
-  // A Clerk ID never satisfies Better Auth, and a Better Auth user never
-  // satisfies Clerk, even when the other provider's settings are present.
-  assert.equal(accessFailure('user_Kyle', config)?.status, 503)
-  const clerk = configuration({
-    ...betterAuthEnv,
-    AUTH_PROVIDER: 'clerk',
-    CLERK_ALLOWED_USER_IDS: 'user_Kyle'
-  })
-  assert.equal(accessFailure(kyle, clerk)?.status, 503)
-  assert.equal(accessFailure('user_Kyle', clerk), null)
   // Missing settings keep the setup response instead of opening access.
   for (const key of [
     'BETTER_AUTH_SECRET',
@@ -212,25 +139,16 @@ test('Better Auth access needs a verified email that is still invited', () => {
     assert.equal(accessFailure(kyle, configuration(partial))?.status, 503)
   }
   assert.equal(authConfiguration(betterAuthEnv).configured, true)
-  assert.equal(authConfiguration(betterAuthEnv).publishableKey, '')
-})
-
-test('Clerk stays the default provider with unchanged configuration', () => {
-  const legacy = {
-    CLERK_PUBLISHABLE_KEY: 'pk_test_ZXhhbXBsZS5jbGVyay5hY2NvdW50cy5kZXYk',
-    CLERK_SECRET_KEY: 'sk_test_fixture'
+  assert.equal(authConfiguration({}).configured, false)
+  // Retired settings left on the host, such as the old provider switch, are
+  // ignored rather than validated.
+  const leftover = {
+    ...betterAuthEnv,
+    AUTH_PROVIDER: 'retired-provider',
+    RETIRED_SECRET_KEY: 'sk_test_fixture'
   }
-  assert.deepEqual(authConfiguration(legacy), {
-    provider: 'clerk',
-    ...clerkConfiguration(legacy)
-  })
-  assert.equal(configuration(legacy).allowedEmails, null)
-  // Better Auth settings are ignored while Clerk is selected.
-  assert.equal(
-    authConfiguration({ ...legacy, AUTH_ALLOWED_EMAILS: 'not-an-email' })
-      .configured,
-    true
-  )
+  assert.equal(authConfiguration(leftover).configured, true)
+  assert.equal(accessFailure(kyle, configuration(leftover)), null)
 })
 
 test('the app forwards only the Better Auth endpoints it uses', async () => {
@@ -278,17 +196,8 @@ test('the app forwards only the Better Auth endpoints it uses', async () => {
     new Request('https://films.example.com/api/auth' + path, {
       method: 'POST'
     })
-  const betterAuth = createAuthRouteHandler(
-    () => fake,
-    () => 'better-auth'
-  )
+  const betterAuth = createAuthRouteHandler(() => fake)
   assert.equal((await betterAuth(request('/sign-in/email'))).status, 200)
   assert.equal((await betterAuth(request('/sign-up/email'))).status, 404)
-  // Nothing reaches Better Auth while Clerk is selected.
-  const clerk = createAuthRouteHandler(
-    () => fake,
-    () => 'clerk'
-  )
-  assert.equal((await clerk(request('/get-session'))).status, 404)
   assert.deepEqual(forwarded, ['/api/auth/sign-in/email'])
 })

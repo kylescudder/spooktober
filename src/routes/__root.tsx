@@ -1,4 +1,3 @@
-import { ClerkProvider } from '@clerk/tanstack-react-start'
 import {
   createRootRoute,
   HeadContent,
@@ -7,11 +6,9 @@ import {
   Scripts
 } from '@tanstack/react-router'
 import { AuthMessage } from '../components/auth-message'
-import { loadAuthConfiguration } from '../lib/page-data'
 import appCss from '../styles.css?url'
 
 export const Route = createRootRoute({
-  beforeLoad: async () => ({ auth: await loadAuthConfiguration() }),
   head: () => ({
     meta: [
       { charSet: 'utf-8' },
@@ -29,7 +26,7 @@ export const Route = createRootRoute({
       { rel: 'icon', href: '/favicon.svg' }
     ]
   }),
-  component: Root,
+  component: Outlet,
   shellComponent: RootDocument,
   notFoundComponent: () => (
     <AuthMessage title='This page has wandered off.'>
@@ -42,36 +39,6 @@ export const Route = createRootRoute({
     </AuthMessage>
   )
 })
-
-function Root() {
-  const { auth } = Route.useRouteContext()
-  // Better Auth pages mount their own UI provider; Clerk wraps the whole app.
-  if (auth.provider !== 'clerk' || !auth.configured) return <Outlet />
-  return (
-    <ClerkProvider
-      publishableKey={auth.publishableKey}
-      signInUrl='/sign-in'
-      signUpUrl='/sign-in'
-      signInForceRedirectUrl='/'
-      signUpForceRedirectUrl='/'
-      afterSignOutUrl='/sign-in'
-      appearance={{
-        variables: {
-          colorPrimary: '#ed9751',
-          colorBackground: '#20201c',
-          colorForeground: '#f2e9dc',
-          colorMutedForeground: '#aaa596',
-          colorInput: '#171714',
-          colorInputForeground: '#f2e9dc',
-          colorBorder: '#3a382f',
-          borderRadius: '0.625rem'
-        }
-      }}
-    >
-      <Outlet />
-    </ClerkProvider>
-  )
-}
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (

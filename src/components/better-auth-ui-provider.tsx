@@ -9,8 +9,7 @@ import { authClient } from '@/lib/auth-client'
 import { profileAvatar, profileFields } from '@/lib/profile-ui'
 import { appHome, safeAppPath } from '@/lib/auth/safe-path'
 
-// Only mounted with AUTH_PROVIDER=better-auth, on the auth, profile and
-// signed-in watchlist pages. Every navigation stays on this site.
+// Mounted only on the auth, profile and signed-in watchlist pages. Every navigation stays on this site.
 export function BetterAuthUIProvider({
   children,
   redirectTo = appHome

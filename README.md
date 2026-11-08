@@ -6,7 +6,7 @@ Kyle and Rhiann's shared Halloween film watchlist. **TanStack Start + TanStack R
 - The current film list is rendered on the server; React handles dragging, checkboxes, adding films, title edits and confirmed removal.
 - Each film's actions menu offers **Edit title** and **Remove film**. Edits keep its place and watched date; removal updates progress and numbering for the selected year. Failed saves retain a retry, including removals whose response was lost.
 - The year picker defaults to the current calendar year. Each year's films, order and progress are separate; `?year=2026` links to a specific season and survives reloads. The picker includes 2020 through next year (and any year opened directly).
-- Clerk provides sign-in; only Kyle and Rhiann's configured user IDs can read or change films.
+- Self-hosted Better Auth provides sign-in; only Kyle and Rhiann's verified, allowlisted emails can read or change films.
 - tRPC shares API input/output types with the client; Zod validates requests, responses and JSON imports.
 - PostgreSQL saves synchronize through a refresh every 15 seconds and when a page regains focus.
 - Concurrent writes coordinate across app instances. Add retries do not duplicate films; stale reorders retain additions.
@@ -28,23 +28,19 @@ compose.dev.yaml             # Local app and development PostgreSQL
 .output/                     # Generated Nitro production server and assets, ignored by Git
 ```
 
-## Sign-in with Clerk
+## Sign-in with Better Auth
 
-The Spooktober Clerk application has development and production instances, with accounts for **kyle@thescudders.org** and **rhiann@thescudders.org** in each. Both instances use email-code sign-in, with passwords, social sign-in and public registration disabled. Production is configured for **spooktober.thescudders.org**; see [Clerk configuration](deploy/README.md#clerk-configuration) for the existing instances and production DNS/certificate checks.
+Sign-in is self-hosted [Better Auth](https://www.better-auth.com): email code, magic link, password and passkey, for the addresses in `AUTH_ALLOWED_EMAILS` only. Sessions and sign-in data live in the app's PostgreSQL database; emails are sent through Brevo. There is no sign-up.
 
-Save development keys and user IDs in private `.env`. The private `.env.clerk.production` holds production Clerk keys, production user IDs and `PUBLIC_URL`; merge it into the server's protected runtime configuration when deploying. It does not contain database credentials and the app does not load that filename automatically. Neither file is committed or included in Docker builds. On a fresh checkout, obtain these values privately from the existing Clerk application. The app permits one or two exact `user_...` IDs and rejects missing, malformed or duplicate entries. Production users have different IDs from development users.
+Sign-in lives at `/auth/sign-in`, and signed-in viewers get an account menu with Profile and Sign out. An authenticated user whose email is unverified or no longer invited sees an access-denied page and cannot use the API. The server-rendered page and every tRPC procedure check access independently.
 
-The app has a cosy `/sign-in` page and an account menu with sign-out. An authenticated user outside the configured pair sees an access-denied page and cannot use the API. The server-rendered page and every tRPC procedure check access independently of middleware. Sign-up links are hidden in the app; accounts are managed through Clerk. The app's user-ID checks enforce private access without relying on Clerk's paid identifier allowlist feature.
+Missing or invalid Better Auth settings show a setup message and deny film API access. Builds require neither auth settings nor database access; the Docker image receives configuration at startup, and no setting is sent to the browser. Settings the app no longer uses are ignored.
 
-Missing keys show a setup message and deny film API access. There is no Basic Auth fallback or automatic creation of a Clerk application. Use `CLERK_PUBLISHABLE_KEY` for the public key. The old `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` name remains supported at runtime so existing deployments keep working; no key is baked into Vite client assets. Builds require neither Clerk keys nor database access; the Docker image receives configuration at startup. Only the publishable key is sent to the browser. **The app and film database are self-hosted; Clerk hosts identity and sessions.** Live login needs network access to Clerk.
-
-See [runtime configuration](deploy/README.md#runtime-configuration) and [Clerk configuration](deploy/README.md#clerk-configuration) before production release.
-
-Self-hosted [Better Auth](https://www.better-auth.com) is available behind `AUTH_PROVIDER=better-auth` (email code, magic link, password and passkey for the emails in `AUTH_ALLOWED_EMAILS`). Clerk remains the default and the rollback; see [Better Auth rollout and Clerk rollback](deploy/README.md#better-auth-rollout-and-clerk-rollback).
+See [runtime configuration](deploy/README.md#runtime-configuration) and [Sign-in with Better Auth](deploy/README.md#sign-in-with-better-auth) before production release.
 
 ## Run locally with Docker
 
-On a fresh checkout, copy `.env.example` to `.env` and configure Clerk as described below. Preserve an existing private `.env`. The local Compose file supplies a development-only PostgreSQL connection and clears `PUBLIC_URL` for localhost.
+On a fresh checkout, copy `.env.example` to `.env` and configure Better Auth as described above. Preserve an existing private `.env`. The local Compose file supplies a development-only PostgreSQL connection and clears `PUBLIC_URL` for localhost.
 
 ```sh
 docker compose -f compose.dev.yaml up -d postgres
@@ -60,7 +56,7 @@ The original shared list belongs to **2026**, preserving its order, watched stat
 
 ## Develop with Bun
 
-Use Bun 1.4.4 for package management, tests and the `bun run db` commands, and Node.js 22.13 or newer for the app runtime. Start only the local PostgreSQL service above, run `bun install --frozen-lockfile`, and set the following development connection in your private `.env`, alongside your Clerk settings:
+Use Bun 1.4.4 for package management, tests and the `bun run db` commands, and Node.js 22.13 or newer for the app runtime. Start only the local PostgreSQL service above, run `bun install --frozen-lockfile`, and set the following development connection in your private `.env`, alongside your Better Auth settings:
 
 ```dotenv
 DATABASE_URL=postgres://spooktober_owner:local-development-only@127.0.0.1:54329/spooktober?sslmode=disable
@@ -85,7 +81,7 @@ bunx --no-install playwright install chromium
 bun run test:e2e
 ```
 
-To include authenticated watchlist UI coverage against real PostgreSQL, set `E2E_WATCHLIST_DATABASE_URL` to a disposable control database ending in `_test` when running `bun run test:e2e`. The test-only Vite host creates its own database and mounts the production watchlist route, with Clerk replaced at the existing trusted-session seam and the server loader replaced by an API read. Tests exercise the real tRPC transport, validation and storage, covering the current-year default (including a new calendar year), year URLs/reloads/history, independent lists/progress/order, and failed-save retry at desktop/mobile sizes. This fixture is absent from production builds and does not verify real Clerk login or server rendering of an authenticated season.
+To include authenticated watchlist UI coverage against real PostgreSQL, set `E2E_WATCHLIST_DATABASE_URL` to a disposable control database ending in `_test` when running `bun run test:e2e`. The test-only Vite host creates its own database and mounts the production watchlist route, with the signed-in session supplied at the existing trusted-session seam and the server loader replaced by an API read. Tests exercise the real tRPC transport, validation and storage, covering the current-year default (including a new calendar year), year URLs/reloads/history, independent lists/progress/order, and failed-save retry at desktop/mobile sizes. This fixture is absent from production builds and does not verify real sign-in or server rendering of an authenticated season.
 
 Integration tests require a disposable PostgreSQL cluster with a privileged test login. They create uniquely named databases; the control database must end in `_test`. With the local development cluster:
 
@@ -94,9 +90,9 @@ docker compose -f compose.dev.yaml exec postgres createdb -U spooktober_owner sp
 TEST_DATABASE_URL='postgres://spooktober_owner:local-development-only@127.0.0.1:54329/spooktober_test?sslmode=disable' bun run test:integration
 ```
 
-Create the control database once. Tests cover migrations, restricted runtime permissions, typed tRPC transport, trusted-session access policy and origin protection, simultaneous changes across pools, and atomic JSON import/export with timestamp precision. The Playwright suite covers setup pages at desktop/mobile sizes, metadata, unknown routes, readiness, fail-closed API responses without Clerk keys, and signed-out redirects/API denials through Clerk’s actual server middleware using nonfunctional fixture keys. Set `E2E_DATABASE_URL` to a disposable migrated PostgreSQL database to verify healthy readiness; otherwise it checks the unavailable response. Real Clerk login and authenticated browser editing require the existing application’s private test credentials and are not simulated.
+Create the control database once. Tests cover migrations, restricted runtime permissions, typed tRPC transport, trusted-session access policy and origin protection, simultaneous changes across pools, and atomic JSON import/export with timestamp precision. The Playwright suite covers setup pages at desktop/mobile sizes, metadata, unknown routes, readiness, and fail-closed API responses without Better Auth settings. Better Auth sign-in, sessions, passkeys, profile photos and access policy are covered by the integration tests against real PostgreSQL. Set `E2E_DATABASE_URL` to a disposable migrated PostgreSQL database to verify healthy readiness; otherwise it checks the unavailable response. Authenticated browser editing outside the watchlist fixture is not simulated.
 
-The image build runs type checks and database-independent tests; run integration checks before releasing. These tests exercise the server access policy with trusted session fixtures; verify real Clerk login, logout and session expiry separately with configured keys.
+The image build runs type checks and database-independent tests; run integration checks before releasing. These tests exercise the server access policy with trusted session fixtures; verify real sign-in, sign-out and session expiry separately with configured settings.
 
 ## Self-hosting
 
@@ -115,5 +111,5 @@ The [pumpkin-and-candle illustration](public/images/pumpkins-and-candles.png) wa
 Server settings are validated with `@t3-oss/env-core` and Zod when they are read.
 Production builds need no runtime credentials. Invalid settings report their names
 without logging secret values; see `.env.example` for the deployment settings.
-Migration commands validate database settings independently of Clerk configuration.
-Missing Clerk keys or an invalid allow-list retain the existing setup/access-denied responses. `PUBLIC_URL`, when supplied, must be an exact HTTP(S) origin.
+Migration commands validate database settings independently of sign-in configuration.
+Missing or invalid Better Auth settings retain the existing setup response. `PUBLIC_URL`, when supplied, must be an exact HTTP(S) origin.
