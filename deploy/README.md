@@ -193,8 +193,7 @@ it); the runtime grant covers it too. Uploads go to `/api/profile/avatar`, which
 requires a verified email still in `AUTH_ALLOWED_EMAILS`, accepts JPEG, PNG or
 WebP up to 2 MiB, and stores a `sharp` re-encoded, metadata-free 256-pixel JPEG
 in PostgreSQL, so the existing encrypted backups already cover it. Photos are
-served only to their owner with `no-store`. With `clerk`, the endpoint answers
-404. Rolling back leaves the table in place, unused.
+served only to their owner with `no-store`. With `clerk`, the endpoint answers 404. Rolling back leaves the table in place, unused.
 
 Prepare these settings in the host's protected runtime configuration, keeping
 the Clerk keys and `CLERK_ALLOWED_USER_IDS` for rollback:
