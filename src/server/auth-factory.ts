@@ -215,7 +215,14 @@ export function createSpooktoberAuth(
           if (!isAllowedEmail(email, settings.allowedEmails))
             return ctx.json({ success: true })
           ctx.body.email = email
-          await reserveEmailDelivery(database, email, settings.dailyEmailLimit)
+          if (
+            !(await reserveEmailDelivery(
+              database,
+              email,
+              settings.dailyEmailLimit
+            ))
+          )
+            return ctx.json({ success: true })
         }
         if (
           ctx.path === '/sign-in/magic-link' ||
@@ -237,7 +244,14 @@ export function createSpooktoberAuth(
           if (!isAllowedEmail(email, settings.allowedEmails))
             return ctx.json({ status: true })
           ctx.body.email = email
-          await reserveEmailDelivery(database, email, settings.dailyEmailLimit)
+          if (
+            !(await reserveEmailDelivery(
+              database,
+              email,
+              settings.dailyEmailLimit
+            ))
+          )
+            return ctx.json({ status: true })
         }
         if (
           ctx.path.startsWith('/passkey/') &&

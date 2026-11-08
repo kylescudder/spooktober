@@ -190,12 +190,14 @@ test('email-code sign-in is allowlisted, hashed, single-use and opens the watchl
   const [stored] = await rows(fixture.db, 'SELECT value FROM auth_verification')
   assert.match(stored!.value, /^[a-f0-9]{64}:0$/)
   assert.notEqual(stored!.value.split(':')[0], otp, 'Raw OTP was persisted')
-  // Per-recipient cooldown: a second email within the minute is refused.
+  // Per-recipient cooldown: a second email within the minute is not sent, and
+  // looks exactly like the answer for an address that gets no mail.
   const tooSoon = await fixture.request('/email-otp/send-verification-otp', {
     email: 'kyle@example.com',
     type: 'sign-in'
   })
-  assert.equal(tooSoon.status, 429)
+  assert.equal(tooSoon.status, 200)
+  assert.deepEqual(await tooSoon.json(), { success: true })
   assert.equal(fixture.sent.get('kyle@example.com'), otp)
   const signedIn = await fixture.request('/sign-in/email-otp', {
     email: 'kyle@example.com',
@@ -235,6 +237,52 @@ test('email-code sign-in is allowlisted, hashed, single-use and opens the watchl
     null
   )
   assert.equal((await fixture.films(cookie)).status, 401)
+})
+
+test('a throttled allowlisted address gets the same answer as an unlisted one', async (t) => {
+  const fixture = await authFixture(t)
+  const endpoints = [
+    ['/email-otp/send-verification-otp', { type: 'sign-in' }],
+    ['/sign-in/magic-link', { callbackURL: '/' }],
+    ['/request-password-reset', { redirectTo: '/auth/reset-password' }]
+  ] as const
+  let address = 100
+  const answer = async (path: string, extra: object, email: string) => {
+    // A fresh IP each time keeps the per-IP send limit out of the comparison.
+    const response = await fixture.request(path, { email, ...extra }, '', {
+      'CF-Connecting-IP': `198.51.100.${++address}`
+    })
+    return { status: response.status, body: await response.text() }
+  }
+  assert.equal(
+    (await answer(endpoints[0][0], endpoints[0][1], 'kyle@example.com')).status,
+    200
+  )
+  const otp = fixture.sent.get('kyle@example.com')!
+  for (const [path, extra] of endpoints) {
+    const throttled = await answer(path, extra, 'kyle@example.com')
+    const unlisted = await answer(path, extra, 'stranger@example.com')
+    assert.deepEqual(throttled, unlisted, path)
+    assert.equal(throttled.status, 200, path)
+  }
+  // Nothing more was sent or charged, and the first code still works.
+  assert.equal(fixture.links.length, 0)
+  assert.equal(fixture.sent.get('kyle@example.com'), otp)
+  assert.equal(fixture.sent.size, 1)
+  const [global] = await rows(
+    fixture.db,
+    "SELECT count FROM auth_email_limit WHERE key = 'global:day'"
+  )
+  assert.equal(global!.count, 1)
+  assert.equal(
+    (
+      await fixture.request('/sign-in/email-otp', {
+        email: 'kyle@example.com',
+        otp
+      })
+    ).status,
+    200
+  )
 })
 
 test('OTP attempts, expiry and cross-site sends are refused without creating accounts', async (t) => {
