@@ -4,6 +4,7 @@ import test, { type TestContext } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
+import sharp from 'sharp'
 import {
   createDatabase,
   type Database,
@@ -14,6 +15,8 @@ import { parseWatchlist } from './watchlist.ts'
 import { createSpooktoberAuth } from './auth-factory.ts'
 import { createAuthRouteHandler } from './auth-route.ts'
 import { createTrpcHandler } from './trpc-handler.ts'
+import { createProfileHandler } from './profile-handler.ts'
+import { handleProfileRequest } from './profile.ts'
 import { virtualAuthenticator } from './fixtures/webauthn.ts'
 
 const authOrigin = 'https://spooktober.auth.test'
@@ -415,6 +418,237 @@ test('profile updates change names only', async (t) => {
       image: null
     }
   )
+})
+
+test('profile photos are re-encoded without metadata, private to their owner and removable', async (t) => {
+  const fixture = await authFixture(t)
+  const { cookie, user } = await signIn(fixture)
+  const other = await signIn(fixture, 'rhiann@example.com')
+  const handler = createProfileHandler(fixture.db, {
+    origin: authOrigin,
+    allowedEmails: () => process.env.AUTH_ALLOWED_EMAILS!.split(','),
+    getSession: (headers) => fixture.auth.api.getSession({ headers })
+  })
+  const photo = await sharp({
+    create: { width: 64, height: 32, channels: 3, background: '#ff7518' }
+  })
+    .jpeg()
+    .withMetadata({
+      exif: { IFD0: { Artist: 'Metadata to strip', Copyright: 'GPS here' } }
+    })
+    .toBuffer()
+  assert.ok((await sharp(photo).metadata()).exif, 'Fixture must carry EXIF')
+  const avatar = (
+    method = 'GET',
+    body?: BodyInit,
+    type = 'image/jpeg',
+    session = cookie,
+    extra: Record<string, string> = {}
+  ) =>
+    handler(
+      new Request(authOrigin + '/api/profile/avatar', {
+        method,
+        body,
+        headers: {
+          Origin: authOrigin,
+          Cookie: session,
+          'Content-Type': type,
+          ...extra
+        }
+      })
+    )
+  const update = (body: unknown, session = cookie) =>
+    fixture.request('/update-user', body, session)
+  const storedImage = async (id = user.id) =>
+    (
+      await rows(fixture.db, `SELECT image FROM auth_user WHERE id = '${id}'`)
+    )[0]!.image
+
+  // Signed out, cross-site and non-image uploads are refused.
+  assert.equal(
+    (await avatar('PUT', new Uint8Array(photo), 'image/jpeg', '')).status,
+    401
+  )
+  assert.equal((await avatar('GET', undefined, 'image/jpeg', '')).status, 401)
+  assert.equal(
+    (
+      await avatar('PUT', new Uint8Array(photo), 'image/jpeg', cookie, {
+        Origin: 'https://evil.example'
+      })
+    ).status,
+    403
+  )
+  assert.equal(
+    (await avatar('PUT', '<svg onload="alert(1)"/>', 'image/svg+xml')).status,
+    415
+  )
+  assert.equal(
+    (await avatar('PUT', '<svg onload="alert(1)"/>', 'image/png')).status,
+    400
+  )
+  assert.equal((await avatar('PUT', 'GIF89a not allowed')).status, 400)
+  // A JPEG signature that the decoder cannot read is still refused.
+  assert.equal(
+    (await avatar('PUT', new Uint8Array([0xff, 0xd8, 0xff, 0, 1, 2]))).status,
+    400
+  )
+  // Size limit, whether or not Content-Length is declared.
+  const tooLarge = new Uint8Array(2 * 1024 * 1024 + 1)
+  tooLarge.set([0xff, 0xd8, 0xff])
+  assert.equal((await avatar('PUT', tooLarge)).status, 413)
+  assert.equal(
+    (
+      await avatar(
+        'PUT',
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(tooLarge)
+            controller.close()
+          }
+        }),
+        'image/jpeg',
+        cookie
+      )
+    ).status,
+    413
+  )
+  assert.equal(await storedImage(), null)
+
+  // Upload: a private, versioned, metadata-free 256px JPEG.
+  const first = await avatar('PUT', new Uint8Array(photo))
+  assert.equal(first.status, 200, await first.clone().text())
+  const { image: firstImage } = (await first.json()) as { image: string }
+  assert.match(firstImage, /^\/api\/profile\/avatar\?v=[0-9a-f-]{36}$/)
+  assert.equal(await storedImage(), firstImage)
+  const picture = await avatar()
+  assert.equal(picture.status, 200)
+  assert.equal(picture.headers.get('Content-Type'), 'image/jpeg')
+  assert.match(picture.headers.get('Cache-Control')!, /no-store/)
+  assert.equal(picture.headers.get('X-Content-Type-Options'), 'nosniff')
+  assert.equal(
+    picture.headers.get('Cross-Origin-Resource-Policy'),
+    'same-origin'
+  )
+  const metadata = await sharp(
+    Buffer.from(await picture.arrayBuffer())
+  ).metadata()
+  assert.equal(metadata.format, 'jpeg')
+  assert.equal(metadata.width, 256)
+  assert.equal(metadata.height, 256)
+  assert.equal(metadata.exif, undefined)
+  assert.equal(metadata.icc, undefined)
+
+  // Better Auth UI confirms the returned URL; only the owner's current one.
+  assert.equal((await update({ image: firstImage })).status, 200)
+  assert.equal((await update({ image: firstImage }, other.cookie)).status, 400)
+  assert.equal((await update({ image: null })).status, 400)
+  assert.equal(
+    (await update({ image: '/api/profile/avatar?v=guessed' })).status,
+    400
+  )
+
+  // Another user can neither read nor replace it.
+  assert.equal(
+    (await avatar('GET', undefined, 'image/jpeg', other.cookie)).status,
+    404
+  )
+  const png = await sharp({
+    create: { width: 40, height: 40, channels: 4, background: '#123456' }
+  })
+    .png()
+    .toBuffer()
+  assert.equal(
+    (await avatar('PUT', new Uint8Array(png), 'image/png', other.cookie))
+      .status,
+    200
+  )
+  assert.equal(await storedImage(), firstImage)
+  assert.notEqual(await storedImage(other.user.id), null)
+
+  // Replace: a new version every time.
+  const replaced = await avatar('PUT', new Uint8Array(png), 'image/png')
+  assert.equal(replaced.status, 200)
+  const { image: nextImage } = (await replaced.json()) as { image: string }
+  assert.notEqual(nextImage, firstImage)
+  assert.equal(await storedImage(), nextImage)
+  assert.equal((await update({ image: firstImage })).status, 400)
+
+  // Unverified or removed emails lose access, even with a live session.
+  await rows(
+    fixture.db,
+    `UPDATE auth_user SET email_verified = false WHERE id = '${user.id}'`
+  )
+  assert.equal((await avatar()).status, 403)
+  await rows(
+    fixture.db,
+    `UPDATE auth_user SET email_verified = true WHERE id = '${user.id}'`
+  )
+  process.env.AUTH_ALLOWED_EMAILS = 'rhiann@example.com'
+  assert.equal((await avatar()).status, 403)
+  assert.equal((await avatar('DELETE')).status, 403)
+  process.env.AUTH_ALLOWED_EMAILS = allowedEmails.join(',')
+
+  // Delete clears both the photo and the user's image.
+  const removed = await avatar('DELETE')
+  assert.equal(removed.status, 200)
+  assert.deepEqual(await removed.json(), { image: null })
+  assert.equal(await storedImage(), null)
+  assert.equal((await avatar()).status, 404)
+  assert.equal((await update({ image: null })).status, 200)
+  assert.equal(
+    (
+      await avatar('DELETE', undefined, 'image/jpeg', cookie, {
+        Origin: 'https://evil.example'
+      })
+    ).status,
+    403
+  )
+  assert.equal((await avatar('POST')).status, 405)
+
+  // The app route: Better Auth uses this handler; Clerk mode has no endpoint.
+  const globals = globalThis as typeof globalThis & { spooktoberAuth?: unknown }
+  delete globals.spooktoberAuth
+  t.after(() => {
+    delete globals.spooktoberAuth
+  })
+  const routed = await handleProfileRequest(
+    new Request(authOrigin + '/api/profile/avatar', {
+      headers: { Cookie: other.cookie }
+    })
+  )
+  assert.equal(routed.status, 200)
+  assert.equal(routed.headers.get('Content-Type'), 'image/jpeg')
+  assert.equal(
+    (
+      await handleProfileRequest(
+        new Request(authOrigin + '/api/profile/avatar')
+      )
+    ).status,
+    401
+  )
+  process.env.AUTH_PROVIDER = 'clerk'
+  for (const method of ['GET', 'PUT', 'DELETE'])
+    assert.equal(
+      (
+        await handleProfileRequest(
+          new Request(authOrigin + '/api/profile/avatar', {
+            method,
+            headers: { Cookie: other.cookie, Origin: authOrigin }
+          })
+        )
+      ).status,
+      404,
+      method
+    )
+  process.env.AUTH_PROVIDER = 'better-auth'
+
+  // Deleting the account removes its photo row.
+  await rows(fixture.db, `DELETE FROM auth_user WHERE id = '${other.user.id}'`)
+  const [left] = await rows(
+    fixture.db,
+    `SELECT count(*)::int AS photos FROM user_profile WHERE user_id = '${other.user.id}'`
+  )
+  assert.equal(left!.photos, 0)
 })
 
 test('passkeys enrol after verified sign-in and refuse replayed or foreign assertions', async (t) => {

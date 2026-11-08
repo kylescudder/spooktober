@@ -242,14 +242,14 @@ test('annual lists keep additions, watched progress and order separate', async (
   assert.deepEqual(await listFilms(pool, 2027), nextYear)
 })
 
-test('migrations are repeatable and record the baseline and auth tables once', async (t) => {
+test('migrations are repeatable and record the baseline, auth and profile tables once', async (t) => {
   const { pool } = await testDatabase(t)
   await migrateDatabase(pool)
   await migrateDatabase(pool)
   assert.deepEqual(await listFilms(pool), [])
   const [journal] = await pool.$client`
     SELECT count(*)::int AS applied FROM drizzle.__drizzle_migrations`
-  assert.equal(journal!.applied, 2)
+  assert.equal(journal!.applied, 3)
 })
 
 test('the baseline adopts a database from the pre-Drizzle migrations', async (t) => {
@@ -655,6 +655,16 @@ test('a restricted runtime role can save films but cannot create schema or alter
   const removed = await removeFilm(runtime, id)
   assert.equal(removed.length, 20)
   assert.ok(removed.every((film) => film.id !== id))
+  // The profile photo table is granted alongside the sign-in tables.
+  assert.deepEqual(
+    [
+      ...(await runtime.$client.unsafe(
+        'SELECT count(*)::int AS photos FROM user_profile'
+      ))
+    ],
+    [{ photos: 0 }]
+  )
+  await runtime.$client.unsafe('DELETE FROM user_profile')
   await assert.rejects(
     runtime.$client.unsafe('CREATE TABLE forbidden (id integer)')
   )

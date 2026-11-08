@@ -187,6 +187,15 @@ The owner migration `0001_better_auth` only adds `auth_user`, `auth_session`,
 between Kyle and Rhiann and are not keyed by user ID, so no film data changes
 and no Clerk user linking is needed: access is decided by the email allow-list.
 
+Profile photos (Better Auth only) arrive with the additive migration
+`0002_profile`, which creates `user_profile` (one row per auth user, removed with
+it); the runtime grant covers it too. Uploads go to `/api/profile/avatar`, which
+requires a verified email still in `AUTH_ALLOWED_EMAILS`, accepts JPEG, PNG or
+WebP up to 2 MiB, and stores a `sharp` re-encoded, metadata-free 256-pixel JPEG
+in PostgreSQL, so the existing encrypted backups already cover it. Photos are
+served only to their owner with `no-store`. With `clerk`, the endpoint answers
+404. Rolling back leaves the table in place, unused.
+
 Prepare these settings in the host's protected runtime configuration, keeping
 the Clerk keys and `CLERK_ALLOWED_USER_IDS` for rollback:
 
