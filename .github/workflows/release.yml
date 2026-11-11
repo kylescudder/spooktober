@@ -72,7 +72,7 @@ jobs:
 
   publish:
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     outputs:
       digest: ${{ steps.manifest.outputs.digest }}
@@ -120,7 +120,7 @@ jobs:
   deploy:
     needs: publish
     if: vars.DEPLOY_ENABLED == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 25
     # Read-only token, used only to fetch deploy/await_release.py.
     permissions:
