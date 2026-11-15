@@ -63,8 +63,14 @@ async function throwawayDatabase() {
     const url = new URL(external)
     if (!['localhost', '127.0.0.1'].includes(url.hostname))
       throw new Error('E2E_DATABASE_URL must be a local disposable database.')
-    if (!url.pathname.slice(1).startsWith(DATABASE_NAME))
-      throw new Error('Use a spooktober_e2e_test disposable database.')
+    if (
+      !['postgres:', 'postgresql:'].includes(url.protocol) ||
+      !url.pathname.slice(1).startsWith(DATABASE_NAME) ||
+      !url.pathname.endsWith('_test')
+    )
+      throw new Error(
+        'Use a local PostgreSQL database starting with spooktober_e2e_test and ending in _test.'
+      )
     return external
   }
   if (spawnSync('initdb', ['--version']).status !== 0)
@@ -125,6 +131,9 @@ async function seedUser(databaseUrl: string) {
   const userId = randomUUID()
   const sql = postgres(databaseUrl, { max: 1, onnotice: () => {} })
   try {
+    // Reused disposable databases must start a new run's auth budget.
+    // Rate limits remain enabled and accumulate normally within the run.
+    await sql`TRUNCATE auth_rate_limit`
     await sql`INSERT INTO auth_user (id, name, email, email_verified)
       VALUES (${userId}, 'E2E Tester', ${email}, true)`
     await sql`INSERT INTO auth_account (id, account_id, provider_id, user_id, password)

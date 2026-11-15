@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 test('a signed-in profile remains available after reload', async ({ page }) => {
   await page.goto('/profile')
@@ -29,7 +30,7 @@ test('a signed-in film can be added and marked watched after reload', async ({
   page
 }, info) => {
   await page.goto('/')
-  const title = `A browser film ${info.project.name}`
+  const title = `A browser film ${info.project.name} ${randomUUID()}`
   await page.getByRole('button', { name: 'Add film', exact: true }).click()
   await page.getByRole('textbox', { name: 'Film title' }).fill(title)
   await page

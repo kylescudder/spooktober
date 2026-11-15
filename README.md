@@ -126,6 +126,8 @@ No production accounts or stored credentials are needed.
 
 Tests live permanently in `e2e/`. Reports are ignored artifacts.
 `E2E_SKIP_BUILD=1` reuses a current build. `E2E_DATABASE_URL` may name a
-disposable local database with the prefix in `e2e/run.ts`; migrations and
+disposable local PostgreSQL database whose name starts with
+`spooktober_e2e_test` and ends in `_test` (for example
+`spooktober_e2e_test_local_test`); migrations and
 fixtures modify that database, so never point it at valuable data.
 Passkeys, real email delivery and production are not exercised.
