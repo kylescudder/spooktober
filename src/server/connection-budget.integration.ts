@@ -39,7 +39,7 @@ async function checkBudget() {
   const controlUrl = process.env.TEST_DATABASE_URL
   if (
     !controlUrl ||
-    !/^\/(postgres|[a-z_]+_test)$/.test(new URL(controlUrl).pathname)
+    !/^\/(postgres|[a-z0-9_]+_test)$/.test(new URL(controlUrl).pathname)
   )
     throw new Error(
       'TEST_DATABASE_URL must name postgres or a disposable database ending in _test'
