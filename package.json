@@ -13,7 +13,7 @@
     "typecheck": "bun run routes:generate && tsc --noEmit",
     "test": "bun test src/lib src/server && bun test src/client",
     "test:integration": "bun test --timeout 20000 ./src/server/*.integration.ts",
-    "test:e2e": "playwright test",
+    "test:e2e": "bun e2e/run.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun run db migrate",
     "db": "bun src/server/cli.ts",

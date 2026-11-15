@@ -16,3 +16,5 @@
 
 /test-results/
 /playwright-report/
+
+state/e2e/
