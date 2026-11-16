@@ -62,22 +62,6 @@ jobs:
         run: bun run build
       - name: Test integration
         run: bun run test:integration
-      - name: Install Playwright browser
-        run: bunx --no-install playwright install --with-deps chromium
-      - name: Test end-to-end
-        env:
-          E2E_SKIP_BUILD: '1'
-        run: bun run test:e2e
-      - name: Save browser evidence
-        if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: browser-evidence
-          path: |
-            artifacts/tanstack-migration/
-            artifacts/year-picker/
-            state/e2e/playwright-report/
-            state/e2e/test-results/
 
   image:
     runs-on: ubuntu-24.04
@@ -103,3 +87,55 @@ jobs:
         env:
           SPOOKTOBER_TEST_IMAGE: spooktober:ci
         run: python3 -B -m unittest discover -s deploy -p test_image.py -v
+
+  e2e:
+    name: E2E tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_DB: spooktober_e2e_test
+          POSTGRES_USER: spooktober_owner
+          # Disposable, job-local database: no password to store or leak.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U spooktober_owner -d spooktober_e2e_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://spooktober_owner@127.0.0.1:5432/spooktober_e2e_test?sslmode=disable
+      E2E_DATABASE_URL: postgres://spooktober_owner@127.0.0.1:5432/spooktober_e2e_test?sslmode=disable
+      E2E_WATCHLIST_DATABASE_URL: postgres://spooktober_owner@127.0.0.1:5432/spooktober_e2e_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+      - name: Install dependencies
+        run: HUSKY=0 bun install --frozen-lockfile
+      - name: Build application
+        run: bun run build
+      - name: Install Chromium
+        run: bunx --no-install playwright install --with-deps chromium
+      - name: Run end-to-end tests
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/e2e-ci
+          bun run test:e2e 2>&1 | tee artifacts/e2e-ci/run.log
+      - name: Save test reports and evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-evidence
+          retention-days: 7
+          path: |
+            artifacts/tanstack-migration/
+            artifacts/year-picker/
+            state/e2e/playwright-report/
+            state/e2e/test-results/
+            artifacts/e2e-ci/
