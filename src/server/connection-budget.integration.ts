@@ -5,7 +5,7 @@ import { createDeploymentDatabase } from './deployment-database.ts'
 import { createDatabase } from './database.ts'
 import postgres from 'postgres'
 function connect(url: string, max: number) {
-  return adapt(postgres(url, { max, connect_timeout: 3, onnotice: () => {} }))
+  return adapt(postgres(url, { max, connect_timeout: 2, onnotice: () => {} }))
 }
 function adapt(pool: postgres.Sql): Client {
   return {
@@ -64,7 +64,8 @@ async function checkBudget() {
     const deployment = adapt(createDeploymentDatabase(url.toString()).$client)
     const health = connect(url.toString(), 1)
     const spare = connect(url.toString(), 2)
-    const overflow = connect(url.toString(), 1)
+    // The app's own client settings, so a longer connect_timeout fails the timing check.
+    const overflow = adapt(createDatabase(url.toString(), 1).$client)
     pools.push(app, deployment, health, spare, overflow)
     // Exercise the real application factory under load, not a lookalike test pool.
     const appRows = await Promise.all(
@@ -97,16 +98,23 @@ async function checkBudget() {
       await connection.query('SELECT 1')
     }
     let rejected = false
+    const started = performance.now()
     try {
       await overflow.query('SELECT 1')
     } catch (error) {
       const value = error as { code?: string; errno?: string }
       rejected = value.code === '53300' || value.errno === '53300'
     }
+    const elapsed = performance.now() - started
     assert.equal(
       rejected,
       true,
       'The ninth connection must hit the real role limit'
+    )
+    // postgres.js v4 retries 53300 until connect_timeout (2 s), then rejects.
+    assert.ok(
+      elapsed < 5000,
+      `A refused connection must fail fast, took ${Math.round(elapsed)} ms`
     )
   } finally {
     await Promise.all(held.map((connection) => connection.release()))

@@ -30,7 +30,9 @@ export function databaseConfig(
     return {
       url: DATABASE_URL,
       max,
-      connect_timeout: 10,
+      // postgres.js v4 retries a connection refused for too many connections
+      // (53300) until connect_timeout passes, so keep it short to fail fast.
+      connect_timeout: 2,
       idle_timeout: 20,
       max_lifetime: 1800,
       onnotice: () => {},
