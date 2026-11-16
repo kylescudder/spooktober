@@ -14,7 +14,7 @@ async function probeDatabase() {
   const { url, ...options } = databaseConfig(process.env.DATABASE_URL, 1)
   const client = postgres(url, {
     ...options,
-    connect_timeout: 3,
+    connect_timeout: 2,
     connection: { ...options.connection, statement_timeout: 3000 }
   })
   const query = client`SELECT id FROM films LIMIT 0`

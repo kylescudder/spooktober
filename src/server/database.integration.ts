@@ -51,7 +51,7 @@ test('database clients retain bounded connection and session safeguards', async 
   const { pool, url } = await testDatabase(t)
   const options = databaseConfig(url.href)
   assert.equal(options.max, 4)
-  assert.equal(options.connect_timeout, 10)
+  assert.equal(options.connect_timeout, 2)
   assert.equal(options.idle_timeout, 20)
   assert.equal(options.max_lifetime, 1800)
   const [settings] = await pool.$client`SELECT

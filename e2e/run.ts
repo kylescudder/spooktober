@@ -118,6 +118,7 @@ async function throwawayDatabase() {
   )
   const admin = postgres(`postgres://postgres@127.0.0.1:${port}/postgres`, {
     max: 1,
+    connect_timeout: 2,
     onnotice: () => {}
   })
   await admin.unsafe(`CREATE DATABASE ${DATABASE_NAME}`)
@@ -129,7 +130,11 @@ async function seedUser(databaseUrl: string) {
   const email = `e2e-${randomUUID()}@example.test`
   const password = randomBytes(24).toString('base64url')
   const userId = randomUUID()
-  const sql = postgres(databaseUrl, { max: 1, onnotice: () => {} })
+  const sql = postgres(databaseUrl, {
+    max: 1,
+    connect_timeout: 2,
+    onnotice: () => {}
+  })
   try {
     // Reused disposable databases must start a new run's auth budget.
     // Rate limits remain enabled and accumulate normally within the run.
