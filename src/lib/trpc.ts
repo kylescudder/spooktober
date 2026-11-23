@@ -50,17 +50,24 @@ export async function sendRequest(year: number, action?: SaveAction) {
           error.meta.response.status === 401) ||
         error.data?.code === 'UNAUTHORIZED'
       )
-        throw new Error('Please reload the page to sign in again.')
+        throw new Error('Please reload the page to sign in again.', {
+          cause: error
+        })
       if (
         (error.meta?.response instanceof Response &&
           error.meta.response.status === 403) ||
         error.data?.code === 'FORBIDDEN'
       )
-        throw new Error('This watchlist is private to Kyle and Rhiann.')
-      if (error.data) throw new Error(error.message)
+        throw new Error('This watchlist is private to Kyle and Rhiann.', {
+          cause: error
+        })
+      if (error.data) throw new Error(error.message, { cause: error })
     }
     throw new Error(
-      'The watchlist is temporarily unavailable. Please try again.'
+      'The watchlist is temporarily unavailable. Please try again.',
+      {
+        cause: error
+      }
     )
   }
 }
