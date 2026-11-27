@@ -49,20 +49,14 @@ export function readDatabaseEnv(runtimeEnv: RuntimeEnv = process.env) {
 }
 
 const authSchema = {
-  // Clerk stays the default and the rollback; Better Auth is opt-in.
-  AUTH_PROVIDER: z.enum(['clerk', 'better-auth']).default('clerk'),
   PUBLIC_URL: origin.optional(),
-  CLERK_ALLOWED_USER_IDS: z.string().optional(),
-  CLERK_PUBLISHABLE_KEY: z.string().optional(),
-  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: z.string().optional(),
-  CLERK_SECRET_KEY: z.string().optional(),
   SPOOKTOBER_REVISION: z.string().default('unknown'),
   PORT: z.coerce.number().int().min(1).max(65535).default(8080),
   HOST: z.string().min(1).default('127.0.0.1'),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development')
 }
 
-// Missing Clerk configuration intentionally retains the existing setup response.
+// Variables outside these schemas, such as retired sign-in settings, are ignored.
 export function readAuthEnv(runtimeEnv: RuntimeEnv = process.env) {
   return createEnv({ server: authSchema, runtimeEnv, ...validation })
 }
@@ -88,8 +82,8 @@ const betterAuthSchema = {
     .pipe(z.array(z.email()))
 }
 
-// Only read when AUTH_PROVIDER=better-auth, so Clerk deployments are unaffected
-// by these settings. Errors name settings only, never their values.
+// Missing settings keep the setup response rather than failing startup. Errors
+// name settings only, never their values.
 export function readBetterAuthEnv(runtimeEnv: RuntimeEnv = process.env) {
   const env = createEnv({
     server: { ...betterAuthSchema, NODE_ENV: authSchema.NODE_ENV },

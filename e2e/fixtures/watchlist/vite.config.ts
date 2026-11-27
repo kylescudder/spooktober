@@ -14,10 +14,7 @@ export default defineConfig({
   publicDir: fileURLToPath(new URL('../../../public', import.meta.url)),
   resolve: {
     alias: {
-      '@': fileURLToPath(new URL('../../../src', import.meta.url)),
-      '@clerk/tanstack-react-start': fileURLToPath(
-        new URL('./clerk.tsx', import.meta.url)
-      )
+      '@': fileURLToPath(new URL('../../../src', import.meta.url))
     }
   },
   plugins: [
@@ -31,6 +28,12 @@ export default defineConfig({
         ) {
           return fileURLToPath(new URL('./page-data.ts', import.meta.url))
         }
+        if (
+          source === '../components/better-auth-user-menu' &&
+          importer?.endsWith('/src/routes/index.tsx')
+        ) {
+          return fileURLToPath(new URL('./user-menu.tsx', import.meta.url))
+        }
       },
       async configureServer(server) {
         const connection = process.env.E2E_WATCHLIST_DATABASE_URL
@@ -43,14 +46,25 @@ export default defineConfig({
         const url = new URL(connection)
         url.pathname = `/${name}`
         process.env.DATABASE_URL = url.href
-        process.env.CLERK_ALLOWED_USER_IDS = 'user_Kyle,user_Rhiann'
+        Object.assign(process.env, {
+          BETTER_AUTH_URL: 'http://127.0.0.1:8080',
+          BETTER_AUTH_SECRET: 'a-disposable-secret-that-is-long-enough',
+          BREVO_API_KEY: 'fixture-never-used-to-send',
+          AUTH_EMAIL_FROM: 'films@example.com',
+          AUTH_ALLOWED_EMAILS: 'kyle@example.com,rhiann@example.com'
+        })
         process.env.PUBLIC_URL = ''
         const pool = createDatabase(url.href)
         await migrateDatabase(pool)
         await pool.$client.end()
-        // The existing trusted-session seam replaces Clerk only in this test
-        // server. Requests use the real tRPC router, validation and PostgreSQL.
-        const handler = createTrpcHandler(async () => 'user_Kyle')
+        // The existing trusted-session seam supplies a signed-in viewer only in
+        // this test server. Requests use the real tRPC router, validation and
+        // PostgreSQL.
+        const handler = createTrpcHandler(async () => ({
+          id: 'kyle',
+          email: 'kyle@example.com',
+          emailVerified: true
+        }))
         server.middlewares.use(async (req, res, next) => {
           if (!req.url?.startsWith('/api/trpc/')) return next()
           try {

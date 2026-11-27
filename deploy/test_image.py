@@ -107,7 +107,8 @@ class RuntimeImage(unittest.TestCase):
                           "INSERT INTO films (id,title,position,created_at,updated_at,year) VALUES ('t1','Halloween',0,'now','now',2026)",
                           "UPDATE films SET watched=true, watched_at='now' WHERE id='t1'",
                           "DELETE FROM films WHERE id='t1'",
-                          "SELECT count(*) FROM auth_user", "DELETE FROM auth_session", "DELETE FROM auth_email_limit"):
+                          "SELECT count(*) FROM auth_user", "DELETE FROM auth_session", "DELETE FROM auth_email_limit",
+                          "SELECT count(*) FROM user_profile", "DELETE FROM user_profile"):
             result = self.runtime_sql(statement)
             self.assertEqual(result.returncode, 0, f'{statement}: {result.stderr}')
         for statement in ("SELECT hash FROM drizzle.__drizzle_migrations",
@@ -137,7 +138,7 @@ class RuntimeImage(unittest.TestCase):
                 run_command(command)
         self.assertEqual(legacy_sql("SELECT id || ' ' || watched_at FROM films").stdout.strip(),
                          'kept 2026-10-31T23:00:00.123456789Z')
-        self.assertEqual(legacy_sql('SELECT count(*) FROM drizzle.__drizzle_migrations').stdout.strip(), '2')
+        self.assertEqual(legacy_sql('SELECT count(*) FROM drizzle.__drizzle_migrations').stdout.strip(), '3')
         # The previous release reads its history after a rollback, but can't change it.
         runtime = lambda statement: legacy_sql(statement, RUNTIME, self.runtime_password)
         self.assertEqual(runtime('SELECT max(version) FROM schema_migrations').stdout.strip(), '2')
@@ -178,6 +179,20 @@ class RuntimeImage(unittest.TestCase):
         result = docker('run', '--rm', '--read-only', '--cap-drop', 'ALL', '--network', 'none', IMAGE, 'node', 'database.cjs', 'help')
         self.assertIn('grant <runtime-role>', result.stdout)
         self.assertNotIn('MODULE_NOT_FOUND', result.stdout + result.stderr)
+
+    def test_profile_photo_codec_works_in_the_runtime_image(self):
+        # sharp's native libvips binary must be traced into the server output for this
+        # image's own OS and architecture, and re-encode without metadata.
+        script = """const { default: sharp } = await import('sharp');
+await sharp({create: {width: 64, height: 32, channels: 3, background: '#ff7518'}}).png()
+  .withMetadata({exif: {IFD0: {Artist: 'strip me'}}}).toBuffer()
+  .then((png) => sharp(png, {failOn: 'error'}).rotate().resize(256, 256, {fit: 'cover'}).jpeg({quality: 85}).toBuffer())
+  .then((jpeg) => sharp(jpeg).metadata())
+  .then((m) => console.log(JSON.stringify({format: m.format, width: m.width, height: m.height, exif: !!m.exif})))"""
+        # Resolve 'sharp' exactly as the server bundle does, from the traced node_modules.
+        result = docker('run', '--rm', '--read-only', '--cap-drop', 'ALL', '--network', 'none', '-w', '/app/.output/server',
+                        IMAGE, 'node', '--input-type=module', '-e', script)
+        self.assertEqual(json.loads(result.stdout), {'format': 'jpeg', 'width': 256, 'height': 256, 'exif': False})
 
     def test_failures_stay_generic_and_do_not_leak_credentials(self):
         run_command(self.commands()[0])

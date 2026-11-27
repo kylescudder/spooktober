@@ -7,27 +7,18 @@ import { database, listFilms } from './database'
 import type { Film } from '../lib/films'
 import { currentYear } from '../lib/years'
 
-export type Page =
-  'watchlist' | 'sign-in' | 'access-denied' | 'auth' | 'profile'
+export type Page = 'watchlist' | 'access-denied' | 'auth' | 'profile'
+
+const signInPath = '/auth/sign-in'
 
 export async function pageData(page: Page, year = currentYear()) {
-  const { provider, configured } = authConfiguration()
-  const unconfigured = { configured: false, provider, films: null, year }
+  const { configured } = authConfiguration()
+  const unconfigured = { configured: false, films: null, year }
   if (!configured) return unconfigured
-  const ready = { configured: true, provider, films: null, year }
-  const betterAuth = provider === 'better-auth'
-  const signInPath = betterAuth ? '/auth/sign-in' : '/sign-in'
-  // Each provider has its own sign-in route; the other one sends people home.
-  if ((page === 'sign-in' && betterAuth) || (page === 'auth' && !betterAuth))
-    throw redirect({ href: signInPath })
-  if (page === 'profile' && !betterAuth) throw redirect({ to: '/' })
+  const ready = { configured: true, films: null, year }
   // Better Auth renders sign-in, reset and sign-out views client-side.
   if (page === 'auth') return ready
   const viewer = await resolveViewer(getRequest().headers)
-  if (page === 'sign-in') {
-    if (viewer) throw redirect({ to: '/' })
-    return ready
-  }
   const failure = accessFailure(viewer)
   if (failure?.status === 401)
     throw redirect({
@@ -49,5 +40,5 @@ export async function pageData(page: Page, year = currentYear()) {
       'Spooktober could not load the initial watchlist from PostgreSQL.'
     )
   }
-  return { configured: true, provider, films, year }
+  return { configured: true, films, year }
 }

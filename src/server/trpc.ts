@@ -22,8 +22,8 @@ import {
 } from './database.ts'
 import { currentYear, seasonSchema } from '../lib/years.ts'
 
-// The viewer comes only from the provider's verified server session (a Clerk
-// user ID or a Better Auth user), never from request input.
+// The viewer comes only from the verified Better Auth server session, never
+// from request input.
 const t = initTRPC.context<{ viewer: Viewer }>().create({
   errorFormatter({ shape, error }) {
     return {

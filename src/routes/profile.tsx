@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
+import { useSession } from '@better-auth-ui/react'
 import { ArrowLeft, Clapperboard } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { authClient } from '@/lib/auth-client'
@@ -12,8 +13,8 @@ import { AuthSetupMessage } from '../components/auth-message'
 import { loadPage } from '../lib/page-data'
 import { clearPendingSignIn } from '../lib/pending-sign-in'
 
-// Better Auth only: the server sends Clerk deployments home, signed-out
-// viewers to sign-in and uninvited ones to the access-denied page.
+// The server sends signed-out viewers to sign-in and uninvited ones to the
+// access-denied page.
 export const Route = createFileRoute('/profile')({
   loader: () => loadPage({ data: 'profile' }),
   component: ProfilePage
@@ -43,7 +44,10 @@ function ProfilePage() {
 }
 
 function BetterAuthProfile() {
-  const { data: session, isPending } = authClient.useSession()
+  // Better Auth UI's session query, not the client's nanostore: sign-in awaits
+  // this query before navigating here, while the nanostore can still hold the
+  // signed-out value from a "Sign in again" round trip and bounce to sign-in.
+  const { data: session, isPending } = useSession(authClient)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const [error, setError] = useState('')

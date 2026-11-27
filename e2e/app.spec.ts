@@ -5,12 +5,7 @@ test('setup pages render and hydrate without exposing the private watchlist', as
 }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
-  for (const path of [
-    '/',
-    '/sign-in',
-    '/sign-in/verify-email-address',
-    '/access-denied'
-  ]) {
+  for (const path of ['/', '/auth/sign-in', '/access-denied', '/profile']) {
     const response = await page.goto(path)
     expect(response?.status()).toBe(200)
     expect(response?.headers()['cache-control']).toBe('private, no-store')
@@ -47,7 +42,7 @@ test('unknown pages return 404 and client navigation returns to the watchlist', 
   ).toBeVisible()
 })
 
-test('film endpoints fail closed without configured Clerk keys', async ({
+test('film endpoints fail closed without Better Auth settings', async ({
   request
 }) => {
   for (const method of ['GET', 'POST']) {
@@ -84,39 +79,4 @@ test('readiness reports database health without revealing films', async ({
     expect(await response.json()).toEqual({ ok: false })
   }
   expect(response.headers()['cache-control']).toBe('private, no-store')
-})
-
-test('Clerk middleware redirects signed-out pages and denies film reads and writes', async ({
-  request
-}) => {
-  for (const path of ['/', '/access-denied']) {
-    const response = await request.get(
-      `http://127.0.0.1:${Number(process.env.E2E_PORT || 8080) + 2}${path}`,
-      { maxRedirects: 0 }
-    )
-    expect(response.status()).toBe(307)
-    expect(response.headers().location).toBe('/sign-in')
-    expect(response.headers()['cache-control']).toBe('private, no-store')
-  }
-  for (const method of ['GET', 'POST']) {
-    const response = await request.fetch(
-      `http://127.0.0.1:${Number(process.env.E2E_PORT || 8080) + 2}/api/trpc/films.${method === 'GET' ? 'list' : 'add'}`,
-      {
-        method,
-        ...(method === 'POST'
-          ? { data: { title: 'Should never be saved' } }
-          : {})
-      }
-    )
-    expect(response.status()).toBe(401)
-    expect(response.headers()['cache-control']).toBe('private, no-store')
-    expect(await response.json()).toEqual({
-      error: 'Please sign in to view the watchlist.'
-    })
-  }
-  const health = await request.get(
-    `http://127.0.0.1:${Number(process.env.E2E_PORT || 8080) + 2}/healthz`
-  )
-  expect(health.status()).toBe(503)
-  expect(await health.json()).toEqual({ ok: false })
 })

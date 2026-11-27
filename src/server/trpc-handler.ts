@@ -8,9 +8,9 @@ import {
 } from './auth.ts'
 import { appRouter } from './trpc.ts'
 
-// The TanStack Start route supplies the selected provider's server session
-// resolver. Tests can exercise transport and access policy without a live
-// Clerk account or an auth bypass.
+// The TanStack Start route supplies the Better Auth session resolver. Tests can
+// exercise transport and access policy without a live session or an auth
+// bypass.
 export function createTrpcHandler(
   resolveViewer: (request: Request) => Promise<Viewer>
 ) {

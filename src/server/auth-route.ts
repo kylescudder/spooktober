@@ -1,5 +1,5 @@
 import '@tanstack/react-start/server-only'
-import { authConfiguration, privateHeaders } from './auth.ts'
+import { privateHeaders } from './auth.ts'
 import type { SpooktoberAuth } from './auth-factory.ts'
 
 // The only Better Auth endpoints the app exposes. Everything else, including
@@ -31,13 +31,10 @@ export function isAllowedAuthPath(path: string) {
   return authPaths.has(path) || /^\/reset-password\/[\w-]+$/.test(path)
 }
 
-export function createAuthRouteHandler(
-  getAuth: () => SpooktoberAuth,
-  provider: () => string = () => authConfiguration().provider
-) {
+export function createAuthRouteHandler(getAuth: () => SpooktoberAuth) {
   return async function authRouteHandler(request: Request) {
     const path = new URL(request.url).pathname.slice('/api/auth'.length)
-    if (provider() !== 'better-auth' || !isAllowedAuthPath(path))
+    if (!isAllowedAuthPath(path))
       return new Response('Not found', { status: 404, headers: privateHeaders })
     return getAuth().handler(request)
   }

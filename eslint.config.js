@@ -47,5 +47,10 @@ export default tseslint.config(
         { allowConstantExport: true }
       ]
     }
+  },
+  {
+    // Registry components intentionally co-export form hooks and style variants.
+    files: ['src/components/auth/**/*.tsx', 'src/components/ui/**/*.tsx'],
+    rules: { 'react-refresh/only-export-components': 'off' }
   }
 )

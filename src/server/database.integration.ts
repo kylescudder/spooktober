@@ -21,6 +21,7 @@ import {
 import { normalizeTimestamp, parseWatchlist } from './watchlist.ts'
 import { createTrpcHandler } from './trpc-handler.ts'
 import type { AppRouter } from './trpc.ts'
+import type { Viewer } from './auth.ts'
 
 async function testDatabase(t: TestContext) {
   const value = process.env.TEST_DATABASE_URL
@@ -50,7 +51,7 @@ test('database clients retain bounded connection and session safeguards', async 
   const { pool, url } = await testDatabase(t)
   const options = databaseConfig(url.href)
   assert.equal(options.max, 4)
-  assert.equal(options.connect_timeout, 10)
+  assert.equal(options.connect_timeout, 2)
   assert.equal(options.idle_timeout, 20)
   assert.equal(options.max_lifetime, 1800)
   const [settings] = await pool.$client`SELECT
@@ -242,14 +243,14 @@ test('annual lists keep additions, watched progress and order separate', async (
   assert.deepEqual(await listFilms(pool, 2027), nextYear)
 })
 
-test('migrations are repeatable and record the baseline and auth tables once', async (t) => {
+test('migrations are repeatable and record the baseline, auth and profile tables once', async (t) => {
   const { pool } = await testDatabase(t)
   await migrateDatabase(pool)
   await migrateDatabase(pool)
   assert.deepEqual(await listFilms(pool), [])
   const [journal] = await pool.$client`
     SELECT count(*)::int AS applied FROM drizzle.__drizzle_migrations`
-  assert.equal(journal!.applied, 2)
+  assert.equal(journal!.applied, 3)
 })
 
 test('the baseline adopts a database from the pre-Drizzle migrations', async (t) => {
@@ -425,15 +426,26 @@ test('tRPC transport validates inputs, requires auth and rejects unsafe requests
   }
   const previous = { ...process.env }
   process.env.DATABASE_URL = url.href
-  process.env.CLERK_ALLOWED_USER_IDS = 'user_Kyle,user_Rhiann'
+  Object.assign(process.env, {
+    BETTER_AUTH_URL: 'https://films.example.com',
+    BETTER_AUTH_SECRET: 'a-disposable-secret-that-is-long-enough',
+    BREVO_API_KEY: 'fixture-never-used-to-send',
+    AUTH_EMAIL_FROM: 'films@example.com',
+    AUTH_ALLOWED_EMAILS: 'kyle@example.com,rhiann@example.com'
+  })
   process.env.PUBLIC_URL = 'https://films.example.com'
   globals.spooktoberDatabase = pool
   cleanup.push(async () => {
     delete globals.spooktoberDatabase
     process.env = previous
   })
-  let userId: string | null = 'user_Kyle'
-  const trpcHandler = createTrpcHandler(async () => userId)
+  const viewer = (name: string) => ({
+    id: name,
+    email: `${name}@example.com`,
+    emailVerified: true
+  })
+  let signedIn: Viewer = viewer('kyle')
+  const trpcHandler = createTrpcHandler(async () => signedIn)
   const client = createTRPCClient<AppRouter>({
     links: [
       httpBatchLink({
@@ -544,9 +556,9 @@ test('tRPC transport validates inputs, requires auth and rejects unsafe requests
     })
   )
   const beforeDenied = await listFilms(pool)
-  userId = null
-  for (const user of [null, 'user_SomeoneElse']) {
-    userId = user
+  signedIn = null
+  for (const user of [null, viewer('someone')]) {
+    signedIn = user
     await assert.rejects(
       client.films.edit.mutate({
         id,
@@ -564,13 +576,12 @@ test('tRPC transport validates inputs, requires auth and rejects unsafe requests
         (user === null ? 401 : 403)
     )
   }
-  userId = null
+  signedIn = null
   const denied = await trpcHandler(
     new Request('http://localhost/api/trpc/films.list', {
       headers: {
-        'x-user-id': 'user_Kyle',
-        'x-clerk-auth-status': 'signed-in',
-        'x-clerk-auth-user-id': 'user_Kyle'
+        'x-user-id': 'kyle',
+        'x-user-email': 'kyle@example.com'
       }
     })
   )
@@ -589,7 +600,7 @@ test('tRPC transport validates inputs, requires auth and rejects unsafe requests
       body
     })
   assert.equal((await trpcHandler(post('{}'))).status, 401)
-  userId = 'user_SomeoneElse'
+  signedIn = viewer('someone')
   assert.equal(
     (await trpcHandler(new Request('http://localhost/api/trpc/films.list')))
       .status,
@@ -597,7 +608,7 @@ test('tRPC transport validates inputs, requires auth and rejects unsafe requests
   )
   assert.equal((await trpcHandler(post('{}'))).status, 403)
   assert.deepEqual(await listFilms(pool), beforeDenied)
-  userId = 'user_Rhiann'
+  signedIn = viewer('rhiann')
   assert.equal((await client.films.list.query()).length, 21)
   assert.equal(
     (await trpcHandler(post('{}', { origin: 'https://elsewhere.example' })))
@@ -655,6 +666,16 @@ test('a restricted runtime role can save films but cannot create schema or alter
   const removed = await removeFilm(runtime, id)
   assert.equal(removed.length, 20)
   assert.ok(removed.every((film) => film.id !== id))
+  // The profile photo table is granted alongside the sign-in tables.
+  assert.deepEqual(
+    [
+      ...(await runtime.$client.unsafe(
+        'SELECT count(*)::int AS photos FROM user_profile'
+      ))
+    ],
+    [{ photos: 0 }]
+  )
+  await runtime.$client.unsafe('DELETE FROM user_profile')
   await assert.rejects(
     runtime.$client.unsafe('CREATE TABLE forbidden (id integer)')
   )

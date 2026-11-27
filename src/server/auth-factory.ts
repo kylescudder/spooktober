@@ -13,6 +13,7 @@ import type { Database } from './database.ts'
 import * as schema from './auth-schema.ts'
 import { reserveEmailDelivery, type LinkEmailKind } from './auth-email.ts'
 import { isAllowedEmail, isVerifiedAllowedUser } from './auth-policy.ts'
+import { currentAvatarURL } from './profile-avatar.ts'
 
 const hasUnsafeCharacters = (value: string) =>
   [...value].some((character) => {
@@ -32,8 +33,9 @@ export function isSameSiteTarget(target: unknown, origin: string) {
   return url.origin === origin && !url.pathname.startsWith('//')
 }
 
-// Profile edits may change names only: never email, verification or a photo
-// (Spooktober has nowhere private to keep one).
+// Profile edits may change names, and confirm the photo the server already
+// stored through /api/profile/avatar. Never email, verification or any other
+// image value (no remote URLs or data URLs).
 const profileUpdateSchema = z
   .strictObject({
     name: z.string().trim().min(1).max(120),
@@ -48,7 +50,8 @@ const profileUpdateSchema = z
       .trim()
       .max(100)
       .nullable()
-      .transform((value) => value ?? '')
+      .transform((value) => value ?? ''),
+    image: z.string().max(200).nullable()
   })
   .partial()
   .refine((value) => Object.keys(value).length > 0)
@@ -189,6 +192,14 @@ export function createSpooktoberAuth(
           if (!parsed.success)
             throw new APIError('BAD_REQUEST', {
               message: 'Invalid profile update'
+            })
+          if (
+            parsed.data.image !== undefined &&
+            parsed.data.image !==
+              (await currentAvatarURL(database, session!.user.id))
+          )
+            throw new APIError('BAD_REQUEST', {
+              message: 'Upload or remove your profile photo first'
             })
           Object.assign(ctx.body, parsed.data)
         }

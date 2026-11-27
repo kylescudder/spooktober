@@ -30,7 +30,9 @@ export function databaseConfig(
     return {
       url: DATABASE_URL,
       max,
-      connect_timeout: 10,
+      // postgres.js v4 retries a connection refused for too many connections
+      // (53300) until connect_timeout passes, so keep it short to fail fast.
+      connect_timeout: 2,
       idle_timeout: 20,
       max_lifetime: 1800,
       onnotice: () => {},
@@ -93,9 +95,8 @@ export async function migrateDatabase(db: Database) {
 
 const roleName = /^[a-z_][a-z0-9_]{0,62}$/
 
-// Better Auth's additive tables. The runtime reads and writes them (sessions,
-// codes, rate limits) only when AUTH_PROVIDER=better-auth, but is granted
-// access in every release so switching provider needs no database change.
+// Better Auth's tables and the profile photo table. The runtime reads and
+// writes them (sessions, codes, rate limits, photos).
 export const authTables = [
   'auth_user',
   'auth_session',
@@ -103,7 +104,8 @@ export const authTables = [
   'auth_verification',
   'auth_passkey',
   'auth_rate_limit',
-  'auth_email_limit'
+  'auth_email_limit',
+  'user_profile'
 ] as const
 
 // The app's login may only read and write the watchlist and sign-in tables; it
