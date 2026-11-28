@@ -123,12 +123,11 @@ connectivity and access to `films`, returning 200 or 503 without film data.
 Production moved to `https://spooktober.thescudders.org` on 27 October 2026.
 Herman's `PUBLIC_URL` and `BETTER_AUTH_URL` use this origin.
 
-The former `spooktober.kylescudder.co.uk` hostname remains registered to
-`spooktober-redirect:8080`. Herman's installed Compose configuration includes a
-small Caddy service using `deploy/redirect.Caddyfile` that sends permanent HTTP 308
-redirects to the new origin while preserving paths and query strings. Start
-that service when recovering the app's host configuration; it has no database
-network or published ports. The deploy webhook keeps its existing protected URL.
+The former `spooktober.kylescudder.co.uk` hostname is a managed redirect on
+Herman's shared Caddy (`hostname.py add ... --redirect-to
+https://spooktober.thescudders.org`). It sends permanent HTTP 308 redirects to the
+new origin, keeping paths and query strings; no separate redirect container runs.
+The deploy webhook keeps its existing protected URL.
 
 ## Sign-in with Better Auth
 
